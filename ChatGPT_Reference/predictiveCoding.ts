@@ -1,3 +1,5 @@
+export {}
+
 /**
  * Supervised Predictive Coding Network (PCN) in TypeScript
  *

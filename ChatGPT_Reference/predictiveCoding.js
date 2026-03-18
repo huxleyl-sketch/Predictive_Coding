@@ -1,35 +1,4 @@
-/**
- * Supervised Predictive Coding Network (PCN) in TypeScript
- *
- * This is a small, annotated implementation of the supervised learning algorithm
- * described in the uploaded paper. It mirrors the vectorized row-batch form:
- *
- *   A^(l)   = X^(l+1) W^(l)^T
- *   Xhat^(l)= f(A^(l))
- *   E^(l)   = X^(l) - Xhat^(l)
- *   H^(l)   = E^(l) ⊙ f'(A^(l))
- *   Yhat    = X^(L) Wout^T
- *   Esup    = Yhat - Y
- *   E^(L)   = Esup Wout
- *
- * Inference:
- *   Gx^(l)  = E^(l) - H^(l-1) W^(l-1)
- *   X^(l)   = X^(l) - etaInfer * Gx^(l)
- *
- * Learning:
- *   Gw^(l)  = -(1/B) H^(l)^T X^(l+1)
- *   W^(l)   = W^(l) - etaLearn * Gw^(l)
- *
- *   Gwout   = (1/B) Esup^T X^(L)
- *   Wout    = Wout - etaLearn * Gwout
- *
- * Shapes:
- *   X^(l):   [B, d_l]
- *   W^(l):   [d_l, d_(l+1)]
- *   Wout:    [d_out, d_L]
- *
- * This implementation uses plain arrays for clarity.
- */
+"use strict";
 var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     if (pack || arguments.length === 2) for (var i = 0, l = from.length, ar; i < l; i++) {
         if (ar || !(i in from)) {
@@ -39,6 +8,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     }
     return to.concat(ar || Array.prototype.slice.call(from));
 };
+Object.defineProperty(exports, "__esModule", { value: true });
 /* -------------------------------------------------------------------------- */
 /*                                Math helpers                                */
 /* -------------------------------------------------------------------------- */
