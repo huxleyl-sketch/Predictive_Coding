@@ -335,6 +335,7 @@ var x = [
 ];
 var labels = [0, 1, 1, 0]; // XOR targets
 var y = oneHot(labels, 2);
+console.log(y);
 // A tiny PCN: input d0=2, latent dims [6, 4], top latent dL=4, output dim=2
 var pcn = new PredictiveCodingNetwork({
     dims: [2, 6, 4],
