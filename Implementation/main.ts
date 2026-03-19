@@ -1,3 +1,5 @@
+import * as tf from '@tensorflow/tfjs';
+
 /**
  * Row priority Matrix  
  * [  
@@ -7,6 +9,8 @@
  * ]  
  */
 type Matrix = number[][];
+
+tf.
 
 type PCNconfig = {
     batchSize: number,
@@ -93,7 +97,7 @@ class PCN {
 
         /** Initialise Values */
         for( let l = 0; l < this.L; l++){
-            this.W[l] = initMatrix(this.D[l],this.D[l + 1]);
+            this.W[l] = tf.xavierUniform(this.D[l],this.D[l + 1]);
             if(l > 0 && l < this.L ){
                 /** Small Random Values */
                 this.X[l] = initMatrix(this.B,this.D[l]);
