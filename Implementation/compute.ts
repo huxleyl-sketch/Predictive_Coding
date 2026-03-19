@@ -33,8 +33,9 @@ for(let t = 1; t <= this.T_infer; t++){
 @group(0) @binding(0) var<storage, read_write> /* Edges */ E : array<f32, /* Layers */ ${pcn.L}>
 
 @compute @workgroup_size(/* width */ ${pcn.B}, /* height */ ${pcn.D[l]}) 
-fn prediction(@builtin(global_invocation_id) id : vec3u) -> array<f32,/*width * height */ 2500>{
-    let A =
+fn prediction(@builtin(global_invocation_id) id : vec3u) -> array<f32,/*width * height */ ${pcn.B * pcn.D[l]}>{
+    for( let j = 0; )
+    let A[i + j * ${pcn.B}] = 
     /* For each x,y coordinate do */
      return array<f32,2500>
 }
