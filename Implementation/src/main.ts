@@ -1,14 +1,9 @@
 import * as tf from '@tensorflow/tfjs';
 
-/**
- * Row priority Matrix  
- * [  
- * [0, 1, 2],  row 1  
- * [3, 4, 5],  row 2  
- * [6, 7, 8],  row 3  
- * ]  
- */
-type Matrix = tf.Tensor2D;
+// Ensure a backend is registered before any eager ops run.
+import '@tensorflow/tfjs-backend-webgl';
+await tf.setBackend('webgl');
+await tf.ready();
 
 type PCNconfig = {
     epochs: number,
@@ -17,39 +12,36 @@ type PCNconfig = {
     T_learn: number,
     eta_learn: number,
     data: {
-        x: Matrix,
-        y: Matrix,
+        x: tf.Tensor2D,
+        y: tf.Tensor2D,
     }[]
 }
 
 class PCN {
     
     /** Latents */
-    X: Matrix[];
+    X: tf.Tensor2D[];
     /** Weights */
     W: tf.Tensor2D[];
     /** Activation Function */
-    f: (m: Matrix) => Matrix;
+    f: (m: tf.Tensor2D) => tf.Tensor2D;
     /** Derivative of Activation Function */
-    df: (m: Matrix) => Matrix;
+    df: (m: tf.Tensor2D) => tf.Tensor2D;
     /** layers */
     L: number;
     /** Dimensions */
     D: number[];
     /** Error */
-    E: Matrix[];
+    E: tf.Tensor2D[];
     /** Gain Modulated Error */
-    H: Matrix[];
-    
-
-   
+    H: tf.Tensor2D[];
 
     /**
      * @param dims Dimensions
      */
     constructor( dims: number[]){
-        this.f = (m: Matrix) => m.relu();
-        this.df = (m: Matrix) => m.max(0);
+        this.f = (m: tf.Tensor2D) => m.relu();
+        this.df = (m: tf.Tensor2D) => m.max(0);
 
         this.H = [];
 
@@ -88,11 +80,10 @@ class PCN {
             /** Initialise Values */
             for( let l = 0; l < this.L; l++){
                 this.W[l] = xavierUniform( this.D[l]!, this.D[l + 1]! );
-                if(l > 0 && l < this.L ){
-                    /** Small Random Values */
-                    this.X[l] = xavierUniform( B, this.D[l]! );
-                }   
+                /** Small Random Values */
+                this.X[l+1] = xavierUniform( B, this.D[l+1]! );
             }
+            
             this.W[this.L + 1] = xavierUniform( this.D[this.L + 1]!, this.D[this.L]! )
 
             /** Input Batch Fixing */
@@ -103,7 +94,7 @@ class PCN {
             for(let t = 1; t <= T_infer; t++){
                 for(let l = 0; l < this.L; l++){
                     /** Pre Activation Predicted Latent Values */
-                    const A_l = tf.matMul(this.X[l+1], this.W[l].transpose()) satisfies Matrix;
+                    const A_l = tf.matMul(this.X[l+1], this.W[l].transpose()) satisfies tf.Tensor2D;
                     /** Predicted Latent Values */
                     const Xhat_l = this.f(A_l);
                     this.E[l] = tf.sub(this.X[l], Xhat_l);
@@ -125,7 +116,7 @@ class PCN {
             for(let t = 1; t <= T_learn; t++){
                 
                 for(let l = 0; l < this.L; l++){
-                    const A_l = tf.matMul(this.X[l+1],this.W[l].transpose()) satisfies Matrix;
+                    const A_l = tf.matMul(this.X[l+1],this.W[l].transpose()) satisfies tf.Tensor2D;
                     const Xhat_l = this.f(A_l);
                     this.E[l] = tf.sub(this.X[l], Xhat_l);
                     this.H[l] = tf.mul(this.E[l],this.df(A_l))
@@ -140,15 +131,24 @@ class PCN {
                 this.W[this.L+1] = tf.sub(this.W[this.L+1], tf.mul(eta_learn, G_w_out)); 
             }
         }}
+        let debug = document.getElementById("debug");
+        if(debug) debug.innerText = "Complete";
     }
 
-    Generate(xBatch: Matrix, T_infer: number, eta_infer: number){
+
+    
+
+    Generate(xBatch: tf.Tensor2D, T_infer: number, eta_infer: number){
         this.X[0] = xBatch;
+        for( let l = 1; l <= this.L; l++){
+            /** Small Random Values */
+            this.X[l] = xavierUniform( xBatch.shape[0], this.D[l]! );
+        }
         /** Inference Update Loop */
         for(let t = 1; t <= T_infer; t++){
             for(let l = 0; l < this.L; l++){
                 /** Pre Activation Predicted Latent Values */
-                const A_l = tf.matMul(this.X[l+1], this.W[l].transpose()) satisfies Matrix;
+                const A_l = tf.matMul(this.X[l+1], this.W[l].transpose()) satisfies tf.Tensor2D;
                 /** Predicted Latent Values */
                 const Xhat_l = this.f(A_l);
                 this.E[l] = tf.sub(this.X[l], Xhat_l);
@@ -162,7 +162,7 @@ class PCN {
                 this.X[l] = tf.sub(this.X[l], tf.mul(eta_infer, G_xl));
             }
         }
-        return tf.matMul(this.X[this.L], this.W[this.L+1].transpose());
+        return tf.matMul(this.X[this.L], this.W[this.L + 1].transpose()) satisfies tf.Tensor2D;
     }
 }
 
@@ -180,10 +180,10 @@ let y = tf.tensor2d([
 ])
 
 let pcnSetup: PCNconfig = {
-    epochs: 2000,
+    epochs: 100,
     T_infer: 50,
     eta_infer: 0.05,
-    T_learn: 500,
+    T_learn: 10,
     eta_learn: 0.005,
     data: [{ x, y, }],
 };
@@ -192,8 +192,17 @@ let pcn = new PCN([2,6,4,2]);
 pcn.Train(pcnSetup);
 document.getElementById("retry")?.addEventListener('click', () => {
     let result = pcn.Generate(x, 50, 0.05);
-    console.log("Result: ",result.print(), "Target:", y.print())
+    
+    console.log("Result:", argMax(result))
+    console.log("Target:", argMax(y))
 });
+function argMax(mat: tf.Tensor2D): number[]{
+    let arr = mat.arraySync();
+    return arr.map(row => {
+        return row[0] > row[1] ? 0 : 1;
+    })
+}
+
 function zeros(rows: number, cols: number): tf.Tensor2D{
     return tf.tensor2d(Array(cols).fill(Array(rows).fill(0)));
 }

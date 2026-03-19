@@ -1,27 +1,16 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>CPU test</title>
-    <link rel="stylesheet" href="style.css" />
-    <script type="importmap">
-      {
-        "imports": {
-          "@tensorflow/tfjs": "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs/dist/tf.esm.js"
-        }
-      }
-    </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Implementation</title>
+    <link rel="icon" href="/favicon.svg" />
   </head>
   <body>
-    <!-- Main Canvas Element -->
-    <canvas id="canvas" width="1000" height="500"></canvas>
-    <!-- Debug Element -->
-    <div id="debug"></div>
-    <label for="retry">Retry</label>
-    <input id="retry" type="button">
-    <!-- Initialise Scripts -->
-    <script type="module" src="main.js"></script>
-
+    <div id="app"></div>
+    <label for="retry">Generate:</label>
+    <input id="retry" type="button" value="Generate">
+    <div id="debug">Wait</div>
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
