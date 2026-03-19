@@ -8,7 +8,6 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     }
     return to.concat(ar || Array.prototype.slice.call(from));
 };
-Object.defineProperty(exports, "__esModule", { value: true });
 /* -------------------------------------------------------------------------- */
 /*                                Math helpers                                */
 /* -------------------------------------------------------------------------- */
@@ -347,12 +346,33 @@ var pcn = new PredictiveCodingNetwork({
     latentInitStd: 0.01,
 });
 // Train for a few epochs
-for (var epoch = 0; epoch < 200; epoch++) {
+for (var epoch = 0; epoch < 10000; epoch++) {
     var result = pcn.trainStep(x, y);
     if ((epoch + 1) % 20 === 0) {
         console.log("Epoch ".concat(epoch + 1, ", loss=").concat(result.loss.toFixed(6)));
     }
 }
+document.getElementById("retry").addEventListener('click', () => {
+    // Predict
+    var logits = pcn.predict(x);
+    console.log("Logits:");
+    console.log(logits);
+    // Argmax helper for class prediction
+    function argmax(row) {
+        var bestIdx = 0;
+        var bestVal = row[0];
+        for (var i = 1; i < row.length; i++) {
+            if (row[i] > bestVal) {
+                bestVal = row[i];
+                bestIdx = i;
+            }
+        }
+        return bestIdx;
+    }
+    var preds = logits.map(argmax);
+    console.log("Predictions:", preds);
+    console.log("Labels     :", labels);
+});
 // Predict
 var logits = pcn.predict(x);
 console.log("Logits:");
