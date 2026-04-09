@@ -1,0 +1,21 @@
+:root {
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+body {
+  margin: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#successCanvas,
+#validationCanvas,
+#errorCanvas,
+#interpretationCanvas {
+  width: min(100%, 720px);
+  height: auto;
+  border: 1px solid #b7c0cd;
+  border-radius: 8px;
+  background: #f8fafc;
+}

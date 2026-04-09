@@ -8,9 +8,15 @@
   </head>
   <body>
     <div id="app"></div>
+    <label for="train">Train:</label>
+    <input id="train" type="button" value="Train" />
     <label for="retry">Generate:</label>
-    <input id="retry" type="button" value="Generate">
+    <input id="retry" type="button" value="Generate" />
     <div id="debug">Wait</div>
+    <canvas id="successCanvas" width="720" height="260" aria-label="Success indicator graph"></canvas>
+    <canvas id="validationCanvas" width="720" height="260" aria-label="Validation accuracy graph"></canvas>
+    <canvas id="errorCanvas" width="720" height="260" aria-label="Training error graph"></canvas>
+    <canvas id="interpretationCanvas" width="720" height="260" aria-label="Prediction interpretation graph"></canvas>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
