@@ -9,6 +9,35 @@ body {
   gap: 10px;
 }
 
+#actionRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+#configPanel {
+  width: min(100%, 720px);
+  display: grid;
+  grid-template-columns: 1fr 120px;
+  gap: 6px 10px;
+  padding: 10px;
+  border: 1px solid #b7c0cd;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+#configPanel h3 {
+  grid-column: 1 / -1;
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+#configPanel input[type="number"] {
+  width: 100%;
+  box-sizing: border-box;
+}
+
 #successCanvas,
 #validationCanvas,
 #errorCanvas,

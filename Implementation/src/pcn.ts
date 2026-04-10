@@ -26,6 +26,8 @@ export type PCNConfig = {
     };
     /** Inference steps used during epoch-end accuracy evaluation */
     evalInferSteps?: number;
+    /** Return true to cooperatively stop training early */
+    stopRequested?: () => boolean;
     /** Enable verbose timing/logging for training diagnostics */
     debug?: boolean;
     data: {
@@ -102,7 +104,7 @@ export class PCN {
         if (this.debug) console.timeEnd(label);
     }
 
-    Train(input: PCNConfig = {
+    async Train(input: PCNConfig = {
         epochs: 2000,
         T_infer: 50,
         eta_infer: 0.05,
@@ -112,7 +114,7 @@ export class PCN {
             x: tf.tensor2d([]),
             y: tf.tensor2d([]),
         }],
-    }): PCNTrainReport {
+    }): Promise<PCNTrainReport> {
         this.time("Training");
         const epochMSE: number[] = [];
         const epochTrainAccuracy: number[] = [];
@@ -126,6 +128,7 @@ export class PCN {
         const haltOnNonFinite = input.haltOnNonFinite ?? true;
         const collectAccuracyHistory = input.collectAccuracyHistory ?? false;
         const evalInferSteps = input.evalInferSteps ?? T_infer;
+        const stopRequested = input.stopRequested ?? (() => false);
         this.debug = input.debug ?? false;
         for (let l = 0; l < this.L; l++) {
             this.W[l] = tf.variable(xavierUniform(this.D[l]!, this.D[l + 1]!));
@@ -134,9 +137,15 @@ export class PCN {
 
         let shouldStop = false;
         for (let epoch = 0; epoch < input.epochs; epoch++) {
+            if (stopRequested()) {
+                shouldStop = true;
+                console.log("Training stop requested before epoch start.");
+                break;
+            }
             let epochWeightedMSE = 0;
             let epochSamples = 0;
-            for (const batch of input.data) {
+            for (let batchIdx = 0; batchIdx < input.data.length; batchIdx++) {
+                const batch = input.data[batchIdx]!;
                 /** Batch Size */
                 const B = batch.x.shape[0]!;
                 const negInvB = tf.scalar(-1 / B);
@@ -220,7 +229,12 @@ export class PCN {
 
                 negInvB.dispose();
                 invB.dispose();
-                if (shouldStop) break;
+                if (shouldStop || stopRequested()) {
+                    shouldStop = true;
+                    this.log(`Training stop requested at epoch ${epoch + 1}, batch ${batchIdx + 1}.`);
+                    break;
+                }
+                await tf.nextFrame();
             }
             const meanEpochMSE = epochSamples > 0 ? epochWeightedMSE / epochSamples : 0;
             if (!Number.isFinite(meanEpochMSE)) {
@@ -228,7 +242,7 @@ export class PCN {
                 shouldStop = true;
             }
             epochMSE.push(meanEpochMSE);
-            this.log(`${epoch + 1} / ${input.epochs} | mse=${meanEpochMSE.toFixed(6)}`);
+            console.log(`${epoch + 1} / ${input.epochs} | mse=${meanEpochMSE.toFixed(6)}`);
             if (collectAccuracyHistory) {
                 if (input.trainEvalData) {
                     epochTrainAccuracy.push(
@@ -245,6 +259,7 @@ export class PCN {
                 this.warn("Stopping early due to non-finite training values.");
                 break;
             }
+            if (shouldStop) break;
         }
         this.timeEnd("Training");
         return { epochMSE, epochTrainAccuracy, epochValidationAccuracy };

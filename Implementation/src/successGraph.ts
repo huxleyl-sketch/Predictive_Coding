@@ -243,10 +243,13 @@ export class ErrorGraph {
 export class InterpretationGraph {
     private canvas: HTMLCanvasElement | null;
     private ctx: CanvasRenderingContext2D | null;
-    private matrix: number[][] = [];
-    private total = 0;
-    private accuracy = 0;
-    private classLabels: string[] = [];
+    private panels: {
+        title: string;
+        matrix: [[number, number], [number, number]];
+        total: number;
+        accuracy: number;
+        positiveClassName: string;
+    }[] = [];
 
     constructor(canvas: HTMLCanvasElement | null) {
         this.canvas = canvas;
@@ -256,42 +259,30 @@ export class InterpretationGraph {
     setFromClasses(
         predicted: ArrayLike<number>,
         target: ArrayLike<number>,
-        labels: string[] = ["Up/Flat", "Down"],
+        labels: string[] = ["Positive", "Abstain"],
     ) {
-        const n = Math.min(predicted.length, target.length);
-        if (n === 0) {
-            this.matrix = [];
-            this.total = 0;
-            this.accuracy = 0;
-            this.classLabels = labels;
-            this.render();
-            return;
-        }
+        const positiveClassName = labels[0] ?? "Positive";
+        this.panels = [this.buildBinaryPanel("Confusion Matrix", predicted, target, positiveClassName)];
+        this.render();
+    }
 
-        let maxClass = 1;
-        for (let i = 0; i < n; i++) {
-            maxClass = Math.max(maxClass, Number(predicted[i] ?? 0), Number(target[i] ?? 0));
-        }
-        const classCount = Math.max(2, maxClass + 1);
-        this.matrix = Array.from({ length: classCount }, () => new Array(classCount).fill(0));
-        this.classLabels = labels.length >= classCount
-            ? labels.slice(0, classCount)
-            : Array.from({ length: classCount }, (_, i) => `Class ${i}`);
+    setDualPcnBinary(
+        upPredicted: ArrayLike<number>,
+        upTarget: ArrayLike<number>,
+        downPredicted: ArrayLike<number>,
+        downTarget: ArrayLike<number>,
+        options?: {
+            upPositiveClassName?: string;
+            downPositiveClassName?: string;
+        },
+    ) {
+        const upPositiveClassName = options?.upPositiveClassName ?? "Up/Flat";
+        const downPositiveClassName = options?.downPositiveClassName ?? "Down";
 
-        let matches = 0;
-        this.total = 0;
-
-        for (let i = 0; i < n; i++) {
-            const p = Number(predicted[i]);
-            const t = Number(target[i]);
-            if (!Number.isInteger(p) || !Number.isInteger(t)) continue;
-            if (t < 0 || t >= classCount || p < 0 || p >= classCount) continue;
-            this.matrix[t]![p]! += 1;
-            this.total += 1;
-            if (p === t) matches += 1;
-        }
-
-        this.accuracy = this.total > 0 ? matches / this.total : 0;
+        this.panels = [
+            this.buildBinaryPanel("UP PCN", upPredicted, upTarget, upPositiveClassName),
+            this.buildBinaryPanel("DOWN PCN", downPredicted, downTarget, downPositiveClassName),
+        ];
         this.render();
     }
 
@@ -301,81 +292,158 @@ export class InterpretationGraph {
         const ctx = this.ctx;
         const width = this.canvas.width;
         const height = this.canvas.height;
-        const left = 130;
-        const right = 20;
-        const top = 52;
-        const bottom = 36;
-
         ctx.clearRect(0, 0, width, height);
         ctx.fillStyle = "#f8fafc";
         ctx.fillRect(0, 0, width, height);
         ctx.font = "12px IBM Plex Sans, sans-serif";
 
         ctx.fillStyle = "#293241";
-        ctx.fillText("Interpretation: Confusion Matrix", 10, 16);
-        ctx.fillText("Rows = Actual, Columns = Predicted", 10, 32);
+        ctx.fillText("Interpretation: PCN Confusion Matrices", 10, 16);
+        ctx.fillText("Rows = Actual, Columns = Predicted (Positive vs Abstain)", 10, 32);
 
-        if (this.total === 0 || this.matrix.length === 0) {
+        if (this.panels.length === 0) {
             ctx.fillStyle = "#6f7784";
             ctx.fillText("No prediction data yet.", 10, 52);
             return;
         }
 
-        const classCount = this.matrix.length;
-        const chartW = width - left - right;
-        const chartH = height - top - bottom;
-        const cellSize = Math.min(chartW / classCount, chartH / classCount);
-        const gridW = cellSize * classCount;
-        const gridH = cellSize * classCount;
-        const gridX = left;
-        const gridY = top;
-        const maxCell = Math.max(...this.matrix.flat(), 1);
+        const panelTop = 38;
+        const panelBottom = 8;
+        const panelHeight = height - panelTop - panelBottom;
+        const gap = 12;
+        const sidePad = 10;
+
+        if (this.panels.length === 1) {
+            this.drawBinaryPanel(this.panels[0]!, sidePad, panelTop, width - sidePad * 2, panelHeight);
+            return;
+        }
+
+        const panelWidth = (width - sidePad * 2 - gap) / 2;
+        this.drawBinaryPanel(this.panels[0]!, sidePad, panelTop, panelWidth, panelHeight);
+        this.drawBinaryPanel(this.panels[1]!, sidePad + panelWidth + gap, panelTop, panelWidth, panelHeight);
+    }
+
+    private buildBinaryPanel(
+        title: string,
+        predicted: ArrayLike<number>,
+        target: ArrayLike<number>,
+        positiveClassName: string,
+    ) {
+        const n = Math.min(predicted.length, target.length);
+        const matrix: [[number, number], [number, number]] = [
+            [0, 0],
+            [0, 0],
+        ];
+
+        let total = 0;
+        let matches = 0;
+
+        for (let i = 0; i < n; i++) {
+            const p = Number(predicted[i]);
+            const t = Number(target[i]);
+            if (!Number.isFinite(p) || !Number.isFinite(t)) continue;
+            const pBin: 0 | 1 = p === 0 ? 0 : 1;
+            const tBin: 0 | 1 = t === 0 ? 0 : 1;
+            matrix[tBin][pBin] += 1;
+            total++;
+            if (pBin === tBin) matches++;
+        }
+
+        return {
+            title,
+            matrix,
+            total,
+            accuracy: total > 0 ? matches / total : 0,
+            positiveClassName,
+        };
+    }
+
+    private drawBinaryPanel(
+        panel: {
+            title: string;
+            matrix: [[number, number], [number, number]];
+            total: number;
+            accuracy: number;
+            positiveClassName: string;
+        },
+        x: number,
+        y: number,
+        w: number,
+        h: number,
+    ) {
+        if (!this.ctx) return;
+        const ctx = this.ctx;
+
+        const labelPadLeft = 70;
+        const labelPadTop = 20;
+        const labelPadBottom = 28;
+        const gridTop = y + 24 + labelPadTop;
+        const gridAvailableH = h - 24 - labelPadTop - labelPadBottom;
+        const gridAvailableW = w - labelPadLeft - 12;
+        const gridSize = Math.max(20, Math.min(gridAvailableW, gridAvailableH));
+        const cellSize = gridSize / 2;
+        const gridX = x + labelPadLeft;
+        const gridY = gridTop;
+
+        ctx.fillStyle = "#1f2937";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "alphabetic";
+        ctx.fillText(`${panel.title} (Positive=${panel.positiveClassName})`, x + 4, y + 14);
 
         ctx.fillStyle = "#374151";
-        ctx.fillText("Predicted", gridX + gridW / 2 - 28, top - 26);
+        ctx.textAlign = "center";
+        ctx.fillText("Predicted", gridX + gridSize / 2, y + 26);
+
         ctx.save();
-        ctx.translate(18, gridY + gridH / 2 + 24);
+        ctx.translate(x + 16, gridY + gridSize / 2 + 8);
         ctx.rotate(-Math.PI / 2);
         ctx.fillText("Actual", 0, 0);
         ctx.restore();
 
-        for (let r = 0; r < classCount; r++) {
-            for (let c = 0; c < classCount; c++) {
-                const count = this.matrix[r]![c]!;
+        const maxCell = Math.max(
+            panel.matrix[0][0],
+            panel.matrix[0][1],
+            panel.matrix[1][0],
+            panel.matrix[1][1],
+            1,
+        );
+
+        for (let r = 0; r < 2; r++) {
+            for (let c = 0; c < 2; c++) {
+                const count = panel.matrix[r]![c]!;
                 const strength = count / maxCell;
-                const x = gridX + c * cellSize;
-                const y = gridY + r * cellSize;
+                const cx = gridX + c * cellSize;
+                const cy = gridY + r * cellSize;
 
                 ctx.fillStyle = `rgba(33, 158, 188, ${0.12 + 0.78 * strength})`;
-                ctx.fillRect(x, y, cellSize, cellSize);
+                ctx.fillRect(cx, cy, cellSize, cellSize);
                 ctx.strokeStyle = "#ffffff";
-                ctx.strokeRect(x, y, cellSize, cellSize);
+                ctx.strokeRect(cx, cy, cellSize, cellSize);
 
                 ctx.fillStyle = "#0f172a";
                 ctx.textAlign = "center";
                 ctx.textBaseline = "middle";
-                ctx.fillText(String(count), x + cellSize / 2, y + cellSize / 2);
+                ctx.fillText(String(count), cx + cellSize / 2, cy + cellSize / 2);
             }
         }
 
-        ctx.textAlign = "center";
-        ctx.textBaseline = "alphabetic";
+        const classLabels = ["Positive", "Abstain"];
         ctx.fillStyle = "#374151";
-        for (let c = 0; c < classCount; c++) {
-            const x = gridX + c * cellSize + cellSize / 2;
-            ctx.fillText(this.classLabels[c]!, x, gridY - 8);
+        ctx.textBaseline = "alphabetic";
+        ctx.textAlign = "center";
+        for (let c = 0; c < 2; c++) {
+            ctx.fillText(classLabels[c]!, gridX + c * cellSize + cellSize / 2, gridY - 6);
         }
 
         ctx.textAlign = "right";
-        for (let r = 0; r < classCount; r++) {
-            const y = gridY + r * cellSize + cellSize / 2 + 4;
-            ctx.fillText(this.classLabels[r]!, gridX - 8, y);
+        for (let r = 0; r < 2; r++) {
+            ctx.fillText(classLabels[r]!, gridX - 6, gridY + r * cellSize + cellSize / 2 + 4);
         }
 
         ctx.textAlign = "left";
         ctx.fillStyle = "#1f2937";
-        ctx.fillText(`Accuracy: ${(this.accuracy * 100).toFixed(2)}%`, 10, height - 12);
-        ctx.fillText(`Samples: ${this.total}`, 170, height - 12);
+        ctx.fillText(`Accuracy: ${(panel.accuracy * 100).toFixed(2)}%`, x + 4, y + h - 8);
+        ctx.fillText(`Samples: ${panel.total}`, x + w * 0.52, y + h - 8);
     }
 }
 
