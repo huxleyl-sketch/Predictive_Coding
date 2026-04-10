@@ -1,0 +1,1074 @@
+              Introduction to Predictive Coding Networks for Machine
+                                                         Learning
+                                                      Mikko Stenlund∗
+                                                        May 29, 2025
+                                                           Abstract
+                       Predictive coding networks (PCNs) constitute a biologically inspired framework for
+                   understandinghierarchicalcomputationinthebrain, andofferanalternativetotraditional
+                   feedforwardneuralnetworksinML.Thisnoteservesasaquick,onboardingintroductionto
+                   PCNsformachinelearningpractitioners. We cover the foundational network architecture,
+                   inference and learning update rules, and algorithmic implementation. A concrete image-
+                   classification task (CIFAR-10) is provided as a benchmark-smashing application, together
+                   with an accompanying Python notebook containing the PyTorch implementation.
+             Contents
+             1 Introduction                                                                                        2
+             2 Network Architecture                                                                                3
+             3 Inference and Learning Rules                                                                        4
+                3.1   Latent state update rule (inference) . . . . . . . . . . . . . . . . . . . . . . . . .       4
+                3.2   Weight update rule (learning) . . . . . . . . . . . . . . . . . . . . . . . . . . . .        5
+                3.3   Locality of the updates . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .      6
+                3.4   Motivations beyond biological plausibility . . . . . . . . . . . . . . . . . . . . . .       6
+             4 Base Algorithms                                                                                     7
+                4.1   Unsupervised learning in PCNs . . . . . . . . . . . . . . . . . . . . . . . . . . .          7
+                4.2   Supervised learning extension . . . . . . . . . . . . . . . . . . . . . . . . . . . .        8
+       arXiv:2506.06332v1  [cs.NE]  31 May 2025
+             5 Application: Supervised Learning on CIFAR-10                                                      10
+                5.1   Model architecture . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .      10
+                5.2   Training procedure . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .      11
+                5.3   Testing . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .   12
+                5.4   PyTorch implementation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .        12
+                      5.4.1   The PCNLayer class . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .      13
+                      5.4.2   The PredictiveCodingNetwork class . . . . . . . . . . . . . . . . . . . .           15
+                      5.4.3   Training loop . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .     16
+                5.5   Results and observations . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .      18
+             References                                                                                          20
+                ∗at pm dot me
+                                                                1
+      1 Introduction
+      The goal of this document is to present a first introduction to predictive coding networks from
+      both conceptual and algorithmic standpoints, in the context of machine learning. We focus on
+      detailing the structure of PCNs, deriving their inference and learning rules, and demonstrating
+      their usefulness in an experiment. This section provides a brief overview to set the stage.
+        Predictive coding is a foundational theory in neuroscience proposing that the brain is fun-
+      damentally a prediction machine, constantly attempting to anticipate incoming sensory inputs
+      and updating internal representations to minimize the difference between expectations and ac-
+      tual observations. This concept forms the basis of the predictive coding network (PCN), a class
+      of hierarchical generative models designed to mirror these principles in artificial systems.
+        Already in 1867, Helmholtz proposed that perception is an unconscious inferential process
+      where the brain predicts how planned actions will affect sensory inputs [12]. In the mid-20th
+      century, Barlow’s efÏcient coding hypothesis posited that the brain economizes neural repre-
+      sentation by removing predictable redundancies in sensory signals [3], foreshadowing a later
+      focus on unexpected or surprising sensory events. Gregory further argued that perception is
+      a constructive, hypothesis-driven endeavor, with visual illusions highlighting how top-down
+      expectations shape perception [10]. By the 1990s, theoretical models explicitly invoked hier-
+      archical prediction: Mumford proposed a cortical architecture in which higher-level areas send
+      predictions to lower-level areas, with only residual errors fed forward [21]. Such concepts set the
+      stage for the predictive coding model of visual cortex by Rao and Ballard [23], which formalized
+      perception as a hierarchical interplay of top-down predictions and bottom-up error signals.
+        Originally developed to explain extra-classical receptive field effects in visual cortex [23],
+      predictive coding has since been generalized into a unified framework for cortical processing
+      through the free-energy principle [8, 9]. This principle casts perception and action as inference
+      problems, where organisms minimize a variational bound on surprise or prediction error.
+        Neurophysiological plausibility of predictive coding has been further explored in works such
+      as [28], which unify predictive coding with biased competition models of attention, and [4],
+      which describe potential microcircuit implementations in cortical hierarchies. Keller and Mrsic-
+      Flogel [13] offer evidence that predictive processing is a canonical computation across the cortex,
+      with supportive anatomical and functional data reviewed by Shipp [26]. Further empirical
+      neuroscience evidence is presented in [30, 5].
+        From a computational modeling perspective, predictive coding networks provide an alter-
+      native to traditional feedforward models trained via backpropagation. Notably, Whittington
+      and Bogacz [31] demonstrated that predictive coding networks can approximate backpropaga-
+      tion in multilayer neural networks using only local updates; see also Millidge et al. [19]. Their
+      implementation in spiking neural networks was reviewed in [22].
+        Predictive coding has also inspired innovations in unsupervised and self-supervised learning.
+      For example, Schmidhuber [25] proposed the predictability minimization principle echoing the
+      redundancy reduction goal of predictive coding. Lotter et al. [15] introduced deep predictive
+      coding networks for video frame prediction, offering state-of-the-art performance using unsu-
+      pervised objectives. Moreover, [11] developed a “world model”—a network that learns a latent
+      predictive representation of an agent’s environment—showing how hierarchical prediction and
+      the minimization of surprise can facilitate efÏcient learning and planning.
+        A broader theoretical and empirical review of predictive coding in both neuroscience and
+      artificial intelligence is provided in [18], which also outlines future research directions.
+        The references cited here are just a bite-sized sample of the enormous literature on the
+      subject. The interested reader is advised to look into the bibliographies in those for more
+      coverage, and to search the arXiv for the latest developments. There are also many excellent
+      blog posts on the subject, such as [17, 1].
+                               2
+                   2 Network Architecture
+                                                                                                                               (l)        d
+                   Model. A PCN consists of L ≥ 1 layers of latent variables x                                                     ∈ R l, 1 ≤ l ≤ L, and an
+                                                            (0)        d0
+                   input layer of variables x                    ∈R . Eachlayer attempts to predict the state of the layer below,
+                   so the architecture includes the following top-down elements for 0 ≤ l ≤ L − 1:
+                                                (l)       dl×dl+1
+                         • Weights W                ∈R                from layer l + 1 to layer l
+                         • Preactivations
+                                                                                      (l)          (l)  (l+1)         d
+                                                                                    a =W x                      ∈Rl
+                         • Predictions
+                                                                                       (l)        (l)    (l)         d
+                                                                                     ˆ                                l
+                                                                                     x =f (a )∈R
+                             where f(l) is, often a nonlinear, scalar function applied elementwise
+                         • Prediction errors
+                                                                                      (l)        (l)       (l)        d
+                                                                                                         ˆ             l
+                                                                                    ε      =x −x ∈R
+                   The loss function subject to minimization is the total square prediction error, or energy:
+                                                                                             L−1
+                                                                                          1 X (l)2
+                                                                                  L=2l=0ε  .
+                         The network can be viewed as a directed acyclic graph; see Figure 1. The “hanging” root
+                   nodes without incoming edges are the input and latent variables; the leaves (end nodes) are
+                   the prediction errors. Observe that the generative hierarchy flows from top to bottom, towards
+                   the input; more on this will be discussed shortly.
+                          x(3)
+                              W(2)
+                                      f(2)                                         −
+                            (2)                   ˆ(2)             (2)       +         (2)
+                          a                      x               x                   ε
+                                                                     W(1)
+                                                                            f(1)                                          −
+                                                                   (1)                  ˆ(1)              (1)       +         (1)
+                                                                 a                      x               x                   ε
+                                                                                                            W(0)
+                                                                                                                   f(0)                                         −
+                                                                                                          (0)                  ˆ(0)              (0)       +         (0)
+                                                                                                        a                      x              x                    ε
+                                         Figure 1: A graph representation of a PCN with three latent layers.
+                                                                                                 3
+                   Alternating minimization procedure. The generative weights W = (W(0),...,W(L−1))
+                   define the overall shape of the predictive coding energy landscape.                                                       For fixed weights and
+                                                                                                             ∗                                        (1)            (L)
+                   input, the inference process seeks a configuration x of latent values x = (x                                                           , . . . , x    ) that
+                   minimizes the energy:
+                                                                              ∗                                    (0)
+                                                                            x =argminL(x;W,x ) .
+                                                                                          x
+                   Optimization then switches to learning, which seeks to perturb the energy landscape by ad-
+                   justing the weights gently to W′ = W + δW (e.g., taking one gradient step with a small
+                                                                                                                                                          ∗
+                   learning rate) so as to further reduce the energy at the inferred configuration x :
+                                                                             ∗       ′    (0)               ∗           (0)
+                                                                       L(x ;W,x )<L(x ;W,x ) .
+                   In this way, inference performs descent within a fixed landscape, while learning deforms the
+                   landscape to better accommodate future inference. This separation of roles gives predictive
+                   coding networks their characteristic two-timescale dynamics: fast inference, slow learning.
+                                                                                                                       (0)
+                         In practice, the procedure repeats for a new input x                                               and reinitialized latent configu-
+                   ration x. Such matters are deferred to the last section where an actual application will be
+                   discussed together with the training details.
+                   Convergence. Several works have established, formally and experimentally, that the alter-
+                   nating optimization procedure in predictive coding networks—consisting of inference steps over
+                   latent variables followed by learning updates of the generative weights—converges to a local
+                   minimumoftheloss under sufÏcient assumptions [31, 27, 7, 16, 2, 24]. That said, what matters
+                   to practitioners is performance in task-specific settings rather than just guarantees of local
+                   convergence under idealized conditions. On that note, the application in the last section serves
+                   as one example where fast convergence and excellent generalization do occur.
+                   Generative hierarchy. The network is built in stacked layers of latent variables. The idea
+                   is that each layer represents the data at a different level of abstraction, from raw sensory
+                   inputs up through progressively higher-order features. Predictions flow top-down (higher layers
+                   predicting lower-layer activity) and errors flow bottom-up. Similar processes are believed to
+                   exist in the brain’s multi-level sensory hierarchies. Rather than just learning a discriminative
+                   mappingfrominputstolabels, thePCNexplicitlyencodesagenerativemodelofhowlower-level
+                   activity could be produced from higher-level causes, so the network can attempt to reconstruct
+                   what the sensory data should look like given its latent beliefs.
+                   A word about hybrid predictive coding. In the algorithms and implementation pre-
+                   sented in this document, the initial values of the latent variables are random—both literally
+                   and figuratively. Recently, an interesting hybrid predictive coding model has been proposed,
+                                                    (l)                                                    (l)
+                   where the latents x                   are initialized to the values ξ                       predicted by another network [29]. The
+                   predictions of this second network flow in the bottom-up direction, opposite to the PCN hier-
+                                                                              (l)      d              d                                                 (l)        (l)   (l−1)
+                   archy, via “amortized” functions g                             : R l−1 → R l in a feedforward fashion: ξ                                 =g (ξ               ),
+                                                                                    (0)         (0)
+                   1 ≤ l ≤ L, starting from the input ξ                                  = x . Such a construction reflects the adjustment
+                   of the network’s posterior beliefs upon receiving sensory input, before the refining inference
+                   process of the vanilla PCN begins. The rest of this note does not involve the hybrid model.
+                   3 Inference and Learning Rules
+                   3.1         Latent state update rule (inference)
+                                                                                        (l)
+                   Weaimto update each latent variable x                                    (1 ≤ l ≤ L) via gradient descent on L.
+                                                                                                  4
+                                                                        (l)                                                              (l)        (l)    ˆ(l)
+                   Case 1 ≤ l < L. The variable x                           appears in two places in the loss: in ε                          =x −x explicitly
+                                 (l−1)         (l−1)       ˆ(l−1)                  ˆ(l−1)           (l−1)       (l−1) (l)
+                   and in ε              =x            −x            through x               =f           (W           x ) . Hence,
+                                               ∂L         X ∂ε(l)                  X ∂ε(l−1)                                X ∂xˆ(l−1)
+                                                                  (l)     j                (l−1)      j             (l)             (l−1)      j
+                                                      =          ε             +         ε                    =ε −                ε
+                                             ∂x(l)                j   ∂x(l)                j       ∂x(l)            i               j        ∂x(l)
+                                                  i         j             i          j                  i                     j                  i
+                   where
+                                                          (l−1)
+                                                      ∂xˆ                ∂                                          ′
+                                                          j                       (l−1)     (l−1)             (l−1)      (l−1)       (l−1)
+                                                                  =           (f         (a        )) = f            (a        )W            .
+                                                       ∂x(l)           ∂x(l)                j                            j          ji
+                                                            i              i
+                                                                                  (l)
+                   Hence, the gradient with respect to x                              is
+                                                                                              ′                         
+                                                              (l)         (l−1)⊤         (l−1)      (l−1)          (l−1)
+                                            ∇ (l)L = ε            −W                  f         (a        ) ⊙ε                      (1 ≤ l < L)
+                                               x
+                                                                                                                           ′
+                   where ⊙ denotes the elementwise (Hadamard) product, f(l−1) is the derivative of f(l−1), and
+                                                                                                                                (l)
+                   the convention used for stacking the entries is that the vectors x                                                and ∇ (l)L have the same
+                                                                                                                                               x
+                   shape.
+                                                               (L)                                      (L−1)
+                   Case l = L. Notice that x                         only appears inside ε                       in the expression of L. Hence,
+                            ∂L           X ∂ε(L−1)                            X ∂xˆ(L−1)                           X                         ′
+                                                 (L−1)       j                        (L−1)       j                        (L−1) (L−1)           (L−1)         (L−1)
+                                     =         ε                      =− ε                                  =− ε f                            (a         )W             .
+                           ∂x(L)                 j        ∂x(L)                       j         ∂x(L)                      j                     j            ji
+                               i           j                   i                j                   i                 j
+                   In vector form,                                                                                                   
+                                                                                                          ′
+                                                           ∇ (L)L = −W(L−1)⊤ f(L−1) (a(L−1))⊙ε(L−1)
+                                                              x
+                   which is similar to 1 ≤ l < L except for the missing first term: there is no prediction error for
+                   the top layer.
+                         Introducing the convenient constant
+                                                                                             (L)
+                                                                                           ε      =0
+                   the inference update rule for the gradient descent algorithm becomes compactly
+                                                                                                    ′                          
+                                     (l)         (l)                 (l)          (l−1)⊤        (l−1)      (l−1)          (l−1)
+                                   x ←x −η                         ε −W                       f        (a         ) ⊙ε                        (1 ≤ l ≤ L)
+                                                           infer
+                   where η             >0is an inference rate of choice.
+                                infer
+                         During inference, all prediction errors and feedback terms are computed first using the
+                                                                                                                             (l)
+                   current network state, and only then are the latent variables x                                                updated. This ensures that
+                   each update step is based on a consistent energy landscape and avoids using partially updated
+                   states within the same iteration.                           Conceptually, this corresponds to a synchronous update
+                   scheme where all neurons compute their next state based on the same network snapshot.
+                   3.2         Weight update rule (learning)
+                                                           (l)                                                     (l)              (l+1)
+                   Each weight matrix W                         is responsible for predicting x                         from x             , and appears only in
+                     (l)        (l)       (l)      (l)   (l+1)
+                   ε     =x −f (W x                            ). To minimize the loss, we compute
+                                                          ∂L           X ∂ε(l)                       X ∂
+                                                                               (l)      k                    (l)               (l)   (l)
+                                                                   =         ε                =− ε                         (f     (a ))
+                                                        ∂W(l)                  k ∂W(l)                       k ∂W(l)                 k
+                                                              ij         k              ij             k               ij
+                                                                                                 5
+                   which yields                                     X
+                                                    ∂L                      (l)      ′   (l)        (l+1)            (l)      ′   (l)    (l+1)
+                                                             =− ε f(l)(a )δ x                               =−ε f(l)(a )x                        .
+                                                        (l)                 k            k      ik  j                i            i      j
+                                                  ∂Wij                k
+                   As before, using the convention that the matrices W(l) and ∇                                                   L have the same shape, we
+                                                                                                                            W(l)
+                   arrive at the gradient                                                                       
+                                                                                              ′
+                                                                 ∇ (l)L = − f(l) (a(l)) ⊙ε(l) x(l+1)⊤ .
+                                                                     W
+                         In particular, the learning update rule via gradient descent is
+                                                                                        ′                  
+                                                   (l)           (l)                  (l)    (l)         (l)     (l+1)⊤
+                                              W ←W +ηlearn f (a )⊙ε                                            x                   (0 ≤ l < L)
+                   with a learning rate of η                       >0.
+                                                            learn
+                         Notice that the quantities
+                                                                                   ′
+                                                                     (l)        (l)    (l)         (l)
+                                                                   h =f (a )⊙ε                                (0 ≤ l < L)
+                   are central, as they appear in the expressions of the gradients with respect to both the latents
+                   and the weights. They could be called gain-modulated errors; see the subsection below.
+                   3.3         Locality of the updates
+                   One of the original motivations behind predictive coding is its potential biological plausibility:
+                   that the brain could implement something akin to deep hierarchical learning using local compu-
+                   tations. Locality typically refers to whether a computation depends only on information from
+                   a given layer and its immediate neighbors. This concept is important both for computational
+                   efÏciency and biological plausibility.
+                         The learning update for the weight matrix W(l) is local in a strong sense: it depends
+                                                                 (l+1)                                                                                                       (l)
+                   only on the local activity x                          of layer l + 1 (presynaptic) and the local prediction error ε
+                   at layer l (postsynaptic), making it compatible with Hebbian-like plasticity mechanisms often
+                   summarized as “neurons that fire together, wire together.”
+                                                                                                                                  (l)
+                         In contrast, while the inference update for a latent variable x                                              depends only on adjacent
+                                                                                             (l−1)
+                   layers, it requires access to the error signal ε                                  broadcast from the lower layer, modulated by
+                   the top-down weights in W(l−1). Thus, inference updates are layer-local but not neuron-local,
+                   since a neuron’s update depends on a weighted sum of errors from other neurons in the layer
+                   below.
+                                                                                        (l)                  (l)      ′   (l)    (l+1)
+                         Biologically, the learning updates δW                              =−η            ε f(l) (a )x                  are thought to be more
+                                                                                       ij            learn i              i      j
+                   plausible than inference updates. Here, ε(l) is the prediction error at the postsynaptic neuron i,
+                             P                                                         i
+                   a(l) =            W(l)x(l+1) is its preactivation, and x(l+1) is the activity of the presynaptic neuron j.
+                     i           m im m                                                          j
+                   Thepreactivation represents the total synaptic input to neuron i—essentially its membrane po-
+                   tential or driving current. In both biological and artificial neurons, this summation is performed
+                   naturally as part of neural activation. The neuron does not need to access other neurons’ states;
+                                                                                                                                       ′   (l)
+                   it simply integrates the inputs it receives via its dendrites. Thus, f(l) (a ) can be interpreted
+                                                                                                                                           i
+                   as a local gain or nonlinearity applied to the neuron’s own internal state. This makes the full
+                   weight update neuron-local in the strong sense: it depends only on information accessible to
+                   the synapse between neurons j → i, including presynaptic activity, postsynaptic error, and
+                   internal quantities of the postsynaptic neuron.
+                   3.4         Motivations beyond biological plausibility
+                   While predictive coding networks (PCNs) are often motivated by neuroscience and cortical
+                   modeling, their architectural design makes them attractive for future machine learning systems
+                   on emerging (e.g., neuromorphic) hardware.
+                                                                                                 6
+                   Locality and parallelism.                           PCNs rely on local computations: each weight update depends
+                   only on the activity and prediction error of adjacent neurons. This makes them well suited to
+                   distributed and parallel computing, in contrast to global gradient backpropagation.
+                   Separation of algorithmic and physical synchrony. Inference in PCNs is described here
+                   as a synchronous algorithm: each update step operates on a fixed snapshot of the network state.
+                   This ensures convergence and simplifies analysis. In principle, the underlying computations
+                   couldbeimplementedasynchronouslyinhardware,withoutneedingaglobalclockorcentralized
+                   scheduling.
+                   Decentralized control.                         Unlike backpropagation, which requires tightly coordinated forward
+                   and backward passes, PCNs do not rely on a global gradient tape or synchronized dataflow.
+                   This allows them to operate on hardware with minimal coordination or shared memory.
+                   Energy-efÏcient, adaptive inference.                                     PCNssupportvariable-lengthinference: predictable
+                   inputs can settle in fewer steps, while uncertain or surprising stimuli drive deeper inference.
+                   This adaptivity enables anytime computation, useful in energy-constrained settings such as
+                   embedded devices or robotics.
+                   Architectural versatility.                          PCNs extend naturally to convolutional, recurrent, and graph-
+                   based structures by redefining local prediction and feedback pathways.
+                         In short, predictive coding offers a biologically inspired view of computation whose design
+                   pattern aligns with the demands of emerging hardware. These properties make PCNs a high-
+                   value target for research in scalable, low-power, and distributed learning systems [6, 19].
+                   4 Base Algorithms
+                   4.1         Unsupervised learning in PCNs
+                   This algorithm implements unsupervised learning in a predictive coding network with L layers
+                                                     (1)            (L)                                               (0)
+                   of latent variables x                 , . . . , x    , with the input variables x                       clamped to the input data; recall
+                   Figure 1 in Section 1. The latent variables are inferred via iterative updates to minimize the
+                   global prediction error energy as discussed earlier, starting from a random initial state. Each
+                   inference step uses a consistent snapshot of the network: all prediction errors and gradients are
+                   computed before any latent state is updated.
+                         Each layer l receives top-down predictions from layer l + 1 through a learned weight ma-
+                   trix W(l) and nonlinearity f(l). After inference, weights are updated using local Hebbian-like
+                   learning rules based on the final prediction errors.
+                   Per-sampletraining. Thebasealgorithmpresentedheredescribesasingleinference-learning
+                   cycle for one input sample. Training proceeds by repeating this cycle over many samples drawn
+                   from a dataset. For each sample, latent variables are inferred and weights are updated once.
+                   For mini-batch training discussed later, the inference loop can be run for the samples in the
+                   current batch in parallel, and the subsequent weight update(s) can be carried out using the
+                   mean gradient over the batch.
+                                                                                                  7
+                   Algorithm 1 Unsupervised learning in a predictive coding network
+                                                  (0)                                         (l)   L−1
+                   Require: Input x , generative weights {W }                                            , activation functions and their derivatives
+                                        ′                                                           l=0
+                         {f(l),f(l) }, number of inference steps T                               , learning rate η                , inference rate η
+                                                                                           infer                            learn                             infer
+                     1: Clamp x(0) ← input data
+                     2: for layer l = 1 to L do
+                                                 (l)
+                     3:        Initialize x           ←small random values
+                     4: end for
+                            (L)
+                     5: ε        ←0                                                                                   ▷ Top layer has no prediction error
+                     6: for step t = 1 to T                     do                                                                 ▷ Inference update loop
+                                                         infer
+                     7:        for layer l = 0 to L − 1 do                                                                  ▷ Store network state snapshot
+                                       (l)           (l)  (l+1)
+                     8:              a ←W x                                                                                                            ▷ Preactivation
+                                     ˆ(l)          (l)    (l)
+                     9:              x ←f (a )                                                                                                              ▷ Prediction
+                                       (l)         (l)     ˆ(l)
+                   10:               ε     ←x −x                                                                                                  ▷ Prediction error
+                   11:         end for
+                   12:         for layer l = 1 to L do                                                                   ▷ Update latents using snapshot
+                                       (l)                                         ′
+                                                  (l)          (l−1)⊤        (l−1)      (l−1)          (l−1)                                                                 (l)
+                   13:               gx ←ε −W (l) f                                 (a        ) ⊙ε                                              ▷ Gradient wrt x
+                                       (l)         (l)
+                   14:               x ←x −η gx
+                                                             infer
+                   15:         end for
+                   16: end for
+                   17: for layer l = 0 to L − 1 do                                                                                               ▷ Weight update
+                                 (l)           (l)   (l+1)
+                   18:         a ←W x
+                               ˆ(l)          (l)    (l)
+                   19:         x ←f (a )
+                                 (l)         (l)     ˆ(l)
+                   20:         ε(l) ← x  −x                     ′        
+                                                  (l)        (l)    (l)       (l+1)⊤                                                                                         (l)
+                   21:         gW←− ε ⊙f (a(l)) x                                                                                             ▷ Gradient wrt W
+                   22:         W(l) ← W(l) −η                     g
+                                                           learn    W
+                   23: end for
+                   Remark. The model can also support anytime inference, where well-predicted inputs con-
+                   verge in fewer steps, and additional inference steps are taken to improve predictions in am-
+                   biguous cases. This adaptivity offers potential energy savings in embedded or neuromorphic
+                   deployments. The algorithm can be modified in this spirit by choosing a sufÏciently large
+                   maximum step count T                         , and running the inference loop until either T                                       steps have been
+                                                          infer                                                                               infer
+                   performed or convergence has been detected. Here convergence means, for instance, that the
+                   norm of the latest update (or updates over a longer patience window) across all latent vari-
+                   ables falls below a preset threshold. In machine learning terminology, this could be phrased as
+                   inference with sample-wise early stopping.
+                   4.2         Supervised learning extension
+                   Aminimalmodification to apply predictive coding in a supervised setting entails simply clamp-
+                                                                             (L)                                               d
+                                                                                                                     ˆ           out
+                   ing the top latent representation x                             to a predicted label y ∈ R                       , treating it as part of the
+                   generative hierarchy. For the sake of variation in this pedagogically oriented note, we introduce
+                                                                                 (L)        ˆ
+                   a separate readout layer that maps x                               7→ y linearly:
+                                                                                      ˆ           out (L)
+                                                                                      y=W x
+                                   out        d    ×d                                                   d
+                   where W              ∈Rout L. Given a target label y ∈ R out, we define a supervised error
+                                                                                        sup       ˆ
+                                                                                      ε      =y−y.
+                                                                                                 8
+             Figure 2 illustrates these changes relative to Figure 1. The loss function (energy) now becomes
+                                                            L+Lsup
+                            1   sup 2
+             where Lsup = 2∥ε      ∥ is the supervised energy.
+                                                                        +
+                                                      ˆ      y      −      sup
+                                                     y                    ε
+                                                       Wout
+                                                      (3)
+                                                    x
+             Figure 2: A supervised extension of the PCN with three latent layers in Figure 1 is obtained
+             by stacking a readout layer on top of the highest latent layer, together with a new root node
+             for the target label.
+                                                                                                      (L)
+                 The supervised error is backpropagated into the top latent representation x              during in-
+             ference.  This does not change the update rules of the lower latents x(l) or the generative
+                         (l)                                            out⊤ sup
+             weights W , 0 ≤ l < L, at all. Since ∇ (L)Lsup = W             ε   , the inference update rule for the
+                                                         x
+             top latent is modified to
+                                                                               ′                  
+                           (L)     (L)             out⊤ sup       (L−1)⊤    (L−1)   (L−1)      (L−1)
+                         x     ←x −ηinfer W             ε   −W             f      (a     ) ⊙ε            .
+             Notethatthisbecomesformallythesameasintheunsupervisedcaseifweintroducethesymbol
+              (L)      out⊤ sup                (L)
+             ε    =W ε (insteadofε =0),whichishowweimplement the algorithm.
+                                           out         sup (L)⊤                            out
+                 Onthe other hand, ∇W Lsup = ε            x     . The output weights W        are thus updated via
+                                                  out       out          sup (L)⊤
+                                               W ←W −ηlearnε x                     .
+                 The core network structure remains unchanged from the unsupervised case; the only mod-
+             ification is the supervised error signal applied to the top layer.
+                                                                9
+                   Algorithm 2 Supervised learning in a predictive coding network
+                                                  (0)                                                                  (l)  L−1                                   out
+                   Require: Input x , target label y, generative weights {W }l=0 , output weights W                                                                   , acti-
+                                                                                                       ′
+                         vation functions and their derivatives {f(l),f(l) }, inference steps T                                               , learning rate η                ,
+                                                                                                                                         infer                           learn
+                         inference rate ηinfer
+                     1: Clamp x(0) ← input data
+                     2: for layer l = 1 to L do
+                                                 (l)
+                     3:        Initialize x           ←small random values
+                     4: end for
+                     5: for step t = 1 to T                     do                                                                 ▷ Inference update loop
+                                                         infer
+                     6:        for layer l = 0 to L − 1 do                                                                  ▷ Store network state snapshot
+                                       (l)           (l)  (l+1)
+                     7:              a ←W x                                                                                                            ▷ Preactivation
+                                     ˆ(l)          (l)    (l)
+                     8:              x ←f (a )                                                                                                              ▷ Prediction
+                                       (l)         (l)     ˆ(l)
+                     9:              ε     ←x −x                                                                                                  ▷ Prediction error
+                   10:         end for
+                               ˆ            out (L)
+                   11:         y←W x                                                                                                                             ▷ Output
+                                 sup        ˆ
+                   12:         ε       ←y−y                                                                                                       ▷ Supervised error
+                                 (L)            out⊤ sup
+                   13:         ε       ←W ε                                                                                                ▷ Convenient notation
+                   14:         for layer l = 1 to L do                                                                   ▷ Update latents using snapshot
+                                       (l)                                         ′
+                                                  (l)          (l−1)⊤        (l−1)      (l−1)          (l−1)
+                   15:               gx ←ε −W (l) f                                 (a        ) ⊙ε
+                                       (l)         (l)
+                   16:               x ←x −η gx
+                                                             infer
+                   17:         end for
+                   18: end for
+                   19: for layer l = 0 to L − 1 do                                                                                               ▷ Weight update
+                                 (l)           (l)   (l+1)
+                   20:         a ←W x
+                               ˆ(l)          (l)    (l)
+                   21:         x ←f (a )
+                                 (l)         (l)     ˆ(l)
+                   22:         ε(l) ← x  −x                     ′        
+                                                  (l)        (l)    (l)       (l+1)⊤
+                   23:         gW←− ε ⊙f (a(l)) x
+                   24:         W(l) ← W(l) −η                     g
+                                                           learn    W
+                   25: end for
+                            out         sup (L)⊤                                                                                                                            out
+                   26: g         ←ε x                                                                                                        ▷ Gradient wrt W
+                            W
+                   27: Wout ← Wout −η                         gout
+                                                        learn    W
+                   5 Application: Supervised Learning on CIFAR-10
+                   To demonstrate the practical applicability of predictive coding networks, we evaluate a su-
+                   pervised PCN on the CIFAR-10 image classification task. CIFAR-10 consists of 60,000 color
+                   images of size 32 × 32 × 3, divided evenly across 10 classes, with 50,000 training and 10,000
+                   test samples [14].
+                   5.1         Model architecture
+                                                                                                (0)         3072
+                   Each input image is flattened into a vector x                                     ∈ R          , normalized to the range [0,1]. The
+                                                                                                                                                           (L)           10
+                   network is defined with L = 3 latent layers, where the topmost latent state x                                                                  ∈ R is
+                                                                                    ˆ          10                                                out          10×10
+                   linearly mapped to an output vector y ∈ R                                       using a readout matrix W                            ∈ R            .   The
+                   latent representations are
+                                                                   (1)         1000         (2)         500         (3)        10
+                                                                 x      ∈R , x ∈R , x ∈R
+                   and the top-down generative weights are
+                                                        (0)        3072×1000              (1)         1000×500              (2)        500×10
+                                                   W ∈R                         ,     W ∈R                        ,    W ∈R
+                                                                                                10
+                   with scalar nonlinearity f(l) = ReLU = max(0, ·) applied elementwise. No bias terms are used.
+                   The network structure is quite arbitrary, following just the battle-tested practice that the layer
+                   dimensions interpolate between the input and output in a quick progression.
+                         The total number of trainable parameters in the PCN is
+                                              3,072×1,000+1,000×500+500×10+10×10=3,577,100 .
+                   To draw a very loose connection with biology, the PCN comprises roughly 4.6×103 “neurons”
+                   (3,072 inputs, 1,000 first-order latents, 500 second-order latents, and 10 outputs) connected by
+                   3.6 ×106 “synapses.”
+                   5.2         Training procedure
+                   All weights are initialized using Xavier initialization, once, at the very beginning.
+                                                                   (0)
+                         Each input-label pair (x                      , y) undergoes the inference and learning cycle, as described in
+                                                                                                                            (1)            (L)
+                   the supervised learning algorithm, with the latent variables x                                               , . . . , x      freshly initialized to
+                                                                                                                           ˆ           out (L)
+                   small Gaussian noise. The output prediction is computed as y = W                                                        x       and the supervised
+                                                                     sup      ˆ                               10
+                   prediction error is given by ε                         =y−ywherey∈R istheone-hot encoded target y.
+                         Although the base algorithm was formulated in a per-sample manner, mini-batch training
+                   improves computational efÏciency and learning stability. We process a batch of B samples
+                         (0)          B                                                                                                                           (l)
+                   {(x ,yb)}                in parallel. Each sample maintains its own set of latent variables x                                                      and er-
+                         b            b=1                                                                                                                         b
+                             (l)
+                   rors ε       , updated independently using the usual inference rule over T iterations. After inference,
+                             b
+                                                          (l)             (l)           ′   (l)      (l+1)⊤                           sup (L)⊤
+                   the weight gradients g                      =−(ε ⊙f(l)(a ))x                                and gout = ε               x          are computed per
+                                                          b               b                 b        b                   b            b      b
+                   sample (as in the base algorithm), and averaged over the batch:
+                                                                                                                   B
+                                                                         W(l) ← W(l) −η                      1 Xg(l)
+                                                                                                      learnB             b
+                                                                                                                 b=1
+                   and
+                                                                                                                   B
+                                                                        Wout ←Wout−η                          1 Xgout
+                                                                                                       learnB             b
+                                                                                                                  b=1
+                   Since the total number of inference updates per batch is B × T                                                   , these learning updates are
+                                                                                                                              infer
+                   performed B times, thus keeping the ratio of inference updates to learning updates at T                                                                        .
+                                                                                                                                                                            infer
+                                                                                        (0)                                       (l)
+                   For each learning step the same inputs x                                  and inferred latents x                    are used to recompute the
+                                                                                        b                                         b
+                   gradients g(l) and gout.
+                                      b              b
+                         This procedure preserves the sample-wise locality of PCN inference and learning, while
+                   leveraging parallel processing on a GPU.
+                   Hyperparameters. For training we set the hyperparameters as follows:
+                         • Batch size: 500 (resulting in 100 train batches, 20 test batches)
+                         • Inference steps per sample: T                              =50
+                                                                               infer
+                         • Inference rate: ηinfer = 0.05
+                         • Learning steps per batch: T                             =500 (equals batch size)
+                                                                            learn
+                         • Learning rate: ηlearn = 0.005
+                   Such choices are largely guided by the belief, or inductive bias, that there should be a distinct
+                   separation of timescales: inference should progress much faster than learning.
+                                                                                                 11
+            5.3    Testing
+            To test the trained network, the weights W(l) and Wout are frozen. For each input-label pair
+              (0)                                    (l)
+            (x ,y) from the test set, the latents x    are initialized randomly and the inference loop is
+                                                                                                         ˆ
+            executed, exactly as in the base algorithm. Once the latents are optimized, the prediction y
+                                                                           (0)                ˆ
+            is read from the output layer. Observe that, given an input x    , the prediction y in practice
+            contains some random noise, since the inference loop starts from randomly initialized latents.
+                                                                                                        ˆ
+               Top-1 and top-3 class-prediction accuracies are used as performance metrics: Let topk(y)
+                                                                           ˆ
+            be the set of k indices corresponding to the largest entries of y. Then the top-k accuracy is
+                                      ˆ
+            the average of 1(y ∈ top (y)) over the test set. Note that the test accuracies for a well-trained
+                                    k
+            PCNvary slightly from one test round to the next, due to the random initialization.
+               In the implementation test samples are handled in batches, just like in training.
+            5.4    PyTorch implementation
+            It is customary in PyTorch to load data as tensors where the batch dimension comes first. In
+            our case the shape of a batch of samples is then (B,d ), corresponding to a matrix X(0) whose
+                                                                 0
+                                         (0)    1×d0
+            rows represent the inputs xb    ∈ R     , 1 ≤ b ≤ B. To adhere to the custom and to allow
+            for efÏcient batch handling via vectorization, we revise the supervised learning algorithm to
+            its final form. The changes from earlier essentially amount to adding a batch dimension to all
+            vectors and transposing certain products. As explained above, the learning step is furthermore
+            repeated B times (by default) instead of just once; this counter-balances the increase in the
+            number of inference steps due to batching prior to any weight updates—from Tinfer per sample
+            in case of no batching (B = 1) to B × T      per batch. To make reasoning about dimensions
+                                                     infer
+            easier, they are listed explicitly on the right side of the algorithm box.
+               During training we also track the batch-averaged total energy
+                                                 B  L−1                          
+                                              1 X 1X (l)           2   1   sup   2
+                                  Ebatch(t) =              ∥ε (t)∥ + ∥ε (t)∥
+                                             B       2       b         2   b
+                                                b=1    l=0
+            at every inference and learning step t. Here the quadratic terms are the per-sample energies.
+            Since there are 100 batches per epoch, we thus generate 100 “energy trajectories” over the
+            time window (0,...,T      +T )per epoch. Note that for sufÏciently small inference and
+                                  infer   learn
+            learning rates these trajectories should be strictly decreasing through inference and learning,
+            which can be used as a sanity check that the implementation is correct. In practice, larger rates
+            are required to escape local minima and to facilitate faster convergence.
+               To support energy-tracking, our implementation reorders a few lines compared to the pseu-
+                                                                     (l)        sup
+            docode here. Specifically, we compute and log the errors ε (t) and ε  (t) pre- and post-update
+                                                                     b          b
+            at each step, then reuse those same quantities for the next inference or weight update. This
+            ensures that we record the energy both before any updates (at t = 0) and immediately after
+            each subsequent update, without redundant recomputation.
+                                                          12
+             Algorithm 3 Supervised learning in a PCN (vectorized row-batch form)
+                                         (0)     B×d                         B×dout                            (l)
+             Require: Input batch X         ∈ R     0, target batch Y ∈ R           , generative weights {W       ∈
+                   d ×d    L−1                       out     dout×d
+                 R l   l+1}   , output weights W        ∈ R        L, activation functions and their derivatives
+                           l=0
+                           ′
+                 {f(l), f(l) }, inference steps per sample T     , learning steps per batch T       =B,inference
+                                                             infer                             learn
+                 rate η    , learning rate η
+                       infer                learn
+              1: for layer l = 1 to L do
+              2:     Initialize X(l) ← small random values                                                ▷ B ×d
+                                                                                                                   l
+              3: end for
+              4: for t = 1 to Tinfer do                                               ▷ Inference update loop
+              5:     for l = 0 to L −1 do
+              6:        A(l) ← X(l+1)W(l)⊤                                                                ▷ B ×d
+                                                                                                                   l
+                         ˆ(l)     (l)  (l)
+              7:        X ←f (A )                                                                         ▷ B ×d
+                                                                                                                   l
+                          (l)     (l)   ˆ(l)
+              8:        E ←X −X                                                                           ▷ B ×d
+                                                                                                                   l
+                                           ′
+                           (l)    (l)    (l)   (l)
+              9:        H =E ⊙f (A )                                                                      ▷ B ×d
+                                                                                                                   l
+             10:     end for
+                     ˆ       (L)   out⊤
+             11:     Y←X W                                                                              ▷ B ×d
+                                                                                                                 out
+                      sup     ˆ
+             12:     E ←Y−Y                                                                             ▷ B ×d
+                                                                                                                 out
+             13:     E(L) ← Esup Wout                                                                     ▷ B ×d
+                                                                                                                  L
+             14:     for l = 1 to L do
+                           (l)     (l)    (l−1)   (l−1)                                 (l)
+             15:        G ←E −H W                       ▷ Grads wrt sample latents x , batched            ▷ B ×d
+                           X                                                            b                          l
+                           (l)     (l)         (l)
+             16:        X ←X −ηinferG                                                                     ▷ B ×dl
+                                               X
+             17:     end for
+             18: end for
+             19: for t = 1 to Tlearn do                                                  ▷ Weight update loop
+             20:     for l = 0 to L −1 do
+             21:        A(l) ← X(l+1)W(l)⊤                                                                ▷ B ×dl
+                         ˆ(l)     (l)  (l)
+             22:        X ←f (A )                                                                         ▷ B ×dl
+                          (l)     (l)   ˆ(l)
+             23:        E ←X −X ′                                                                         ▷ B ×dl
+                           (l)    (l)    (l)   (l)
+             24:        H =E ⊙f (A )                                                                      ▷ B ×d
+                                                                                                                   l
+                           (l)     1   (l)⊤  (l+1)                                              (l)
+             25:        G ←− H X                               ▷ Batch-averaged grad wrt W              ▷ d ×d
+                           W       B                                                                       l    l+1
+                           (l)      (l)           (l)
+             26:        W ←W −η G                                                                       ▷ d ×d
+                                           learn  W                                                        l    l+1
+             27:     end for
+                     ˆ       (L)   out⊤
+             28:     Y←X W                                                                              ▷ B ×d
+                                                                                                                 out
+                      sup     ˆ
+             29:     E ←Y−Y                                                                             ▷ B ×d
+                              1                                                                                  out
+                       out        sup⊤   (L)                                                   out
+             30:     G ← E X                                  ▷ Batch-averaged grad wrt W               ▷ d   ×d
+                       W      B                                                                            out    L
+                        out      out           out
+             31:     W ←W −η G                                                                          ▷ d   ×d
+                                        learn  W                                                           out    L
+             32: end for
+                Next, key modules of the Python code will be described. Full implementation details are
+             provided in the accompanying Python notebook, available in a GitHub repository [20].
+             5.4.1   The PCNLayer class
+             Each latent layer of the PCN is encapsulated by the PCNLayer class, defined as follows:
+                                                               13
+             PCNLayer class
+             class PCNLayer(nn.Module):
+                 def __init__(self,
+                               in_dim,
+                               out_dim,
+                               activation_fn=torch.relu,
+                               activation_deriv=lambda a: (a > 0).float()
+                               ):
+                      super().__init__()
+                      self.W = nn.Parameter(torch.empty(out_dim, in_dim))
+                      nn.init.xavier_uniform_(self.W)
+                      self.activation_fn      = activation_fn
+                      self.activation_deriv = activation_deriv
+                 def forward(self, x_above):
+                      with autocast(device_type=’cuda’):
+                          a     = x_above @ self.W.T
+                          x_hat = self.activation_fn(a)
+                          return x_hat, a
+                The PCNLayer class inherits from torch.nn.Module, making it a standard building block
+            in the PyTorch ecosystem. Its constructor,     init , initializes the following components:
+                • Weights (self.W): The learnable generative weight matrix, corresponding to W(l) in
+                  our model, is initialized as a torch.nn.Parameter. This ensures that the weights are
+                  recognized by PyTorch’s autograd system and can be updated during the learning phase.
+                  The dimensions are (out dim, in dim), representing d × d           , connecting layer l + 1
+                                                                             l    l+1
+                  (of in dim neurons) to layer l (of out dim neurons) in a top-down predictive manner.
+                  Xavier uniform initialization (nn.init.xavier uniform ) is used to set the initial values
+                  of these weights. No biases are used.
+                • Activation function (self.activation fn): This stores the element-wise nonlinear
+                  activation function f(l), which defaults to ReLU (torch.relu).
+                • Activation derivative (self.activation deriv): This stores the derivative of the
+                                           ′
+                                         (l)                                                        (l)
+                  activation function, f   , required for calculating the gain-modulated errors H      during
+                  both inference and learning updates. The default is the derivative of ReLU.
+                The core computation of a layer—generating a prediction for the layer below—is handled
+            by the forward method. Given an input x above (representing the state of the layer above,
+            X(l+1) in batch form), this method performs two main operations:
+               1. It computes the pre-activation A(l) = X(l+1)W(l)⊤ (denoted a in the code). This corre-
+                  sponds to the matrix multiplication x above @ self.W.T.
+               2. It then applies the layer’s activation function f(l) to the pre-activations a to produce the
+                              ˆ(l)
+                  prediction X    (denoted x hat in the code).
+            The method returns both the prediction x hat and the pre-activation a, as both are needed for
+            subsequent error calculations and gradient computations as detailed in the vectorized algorithm
+            (Algorithm 3). By encapsulating these operations in a single module, PCNLayer separates the
+            per-layer computations required for both inference (updating latents) and learning (updating
+            weights) in Algorithm 3. The use of autocast(device type=’cuda’) is for mixed-precision
+            training, which can improve computational efÏciency on compatible hardware.
+                                                            14
+             5.4.2   The PredictiveCodingNetwork class
+             Building upon the PCNLayer, the PredictiveCodingNetwork class organizes the entire net-
+             work hierarchy and its operations. This class, also inheriting from torch.nn.Module, manages
+             the collection of layers, the readout mechanism for supervised tasks, and utility functions for
+             initialization and error computation.
+              PredictiveCodingNetwork class
+              class PredictiveCodingNetwork(nn.Module):
+                  def __init__(self,
+                                dims,
+                                output_dim
+                                ):
+                       super().__init__()
+                       self.dims = dims
+                       self.L = len(dims) - 1
+                       self.layers = nn.ModuleList([
+                           PCNLayer(in_dim=dims[l+1],
+                                     out_dim=dims[l])
+                           for l in range(self.L)
+                       ])
+                       self.readout = nn.Linear(dims[-1], output_dim, bias=False)
+                  def init_latents(self, batch_size, device):
+                       return [
+                          torch.randn(batch_size, d, device=device,
+                                        requires_grad=False)
+                          for d in self.dims[1:]
+                       ]
+                  def compute_errors(self, inputs_latents):
+                       errors, gain_modulated_errors = [], []
+                       for l, layer in enumerate(self.layers):
+                           x_hat, a   = layer(inputs_latents[l + 1])
+                           err        = inputs_latents[l] - x_hat
+                           gm_err     = err * layer.activation_deriv(a)
+                           errors.append(err)
+                           gain_modulated_errors.append(gm_err)
+                       return errors, gain_modulated_errors
+                The init constructor takes
+                                     dims = [d ,d ,...,d ]     and output dim = d
+                                                0  1       L                           out
+             specifying the dimensions of each layer in the network (from the input’s d0 to the topmost
+             latent’s d  and readout’s d    ) and performs the following:
+                       L                  out
+                • Dimensions (self.dims, self.L): The dims list and self.L = len(dims)-1 = L are
+                   stored.
+                • Generative layers (self.layers): A torch.nn.ModuleList is created to hold the
+                   stack of PCNLayer instances representing the L latent layers.           Each PCNLayer maps
+                     d        d
+                   R l+1 → R l as in the generative model. The dimensions are drawn from dims.
+                • Readout layer (self.readout): For supervised learning, a torch.nn.Linear layer
+                   is defined as self.readout.       As with the latent layers, the learnable weight matrix
+                   self.readout.weight corresponding to Wout is initialized as Xavier uniform. This layer
+                                                              15
+                   mapsthetopmostlatentstateX(L) (withdimensiondims[-1] = d )totheoutputpredic-
+                                                                                          L
+                        ˆ
+                   tion Y (with dimension output dim = d          ). In alignment with the supervised extension
+                                                               out
+                                                       ˆ      (L)   out⊤
+                   described, the layer implements Y = X         W withoutabiasterm.
+             The class includes two methods to facilitate the PCN’s operation:
+                • init latents(self, batch size, device): Thismethodinitializesthelatentvariables
+                   as in lines 1–3 in Algorithm 3.       For a given batch size, it creates a list of tensors
+                   [X(1),...,X(L)] with values drawn independently from N(0,1), ensuring they are on the
+                   specified device. The flag requires grad=False ensures PyTorch’s autograd engine
+                   does not compute or store gradients for these latent variables, as they are updated via
+                   the explicit inference rule instead of automatic differentiation of a loss function.
+                • compute errors(self, inputs latents): This method calculates the prediction er-
+                          (l)                                      (l)
+                   rors E    and the gain-modulated errors H          for all layers 0 ≤ l < L. It takes a list
+                   inputs latents = [X(0),X(1),...,X(L)] (containing the current input batch and all cur-
+                   rent latent states) as input. It iterates through each PCNLayer in self.layers, using
+                                                                           ˆ(l)                        (l)
+                   the layer’s forward method to get the prediction X           and pre-activation A . It then
+                                                                        ′
+                                (l)    (l)   ˆ(l)        (l)    (l)    (l)  (l)
+                   computes E      =X −X andH =E ⊙f (A ). Thesecomputationsarecentral
+                   to both the inference and learning phases, as seen in lines 6–9 and 21–24 of Algorithm 3.
+                                                                           (l)                               (l)
+                   The method returns two lists: one containing all E         and another containing all H .
+                Together, these components and methods provide a modular PyTorch representation of the
+             predictive coding network, suitable for the supervised learning task described.
+             5.4.3   Training loop
+             Finally, to show the operational aspects of the model, a minimal training loop is presented
+             next.  Focusing on essential update mechanisms, it differs slightly from the accompanying
+             Python notebook, which also implements the energy-tracking features discussed earlier.
+                The function train pcn takes the PCN model, a PyTorch data loader for batching, the
+             number of training num epochs, rates eta infer and eta learn, and the number of steps for
+             inference (T infer) per sample and learning (T learn) per batch, along with the target device.
+                The training process begins by setting the model to training mode and moving it to the
+             specified device. It then iterates for a given number of num epochs. Within each epoch,
+             mini-batches of data (x batch, y batch) are processed. Input features x batch are flattened
+             and, along with the one-hot encoded targets y batch, moved to the target device. The list
+             inputs latents is initialized to hold the input batch X(0) followed by the randomly initialized
+             latent variables X(1),...,X(L) obtained from model.init latents(). Notably, a list named
+             weights is created containing direct references to the model’s weight tensors (layer.W for
+             generative layers and model.readout.weight for the readout layer). Updates to elements of
+             this weights list will therefore modify the model’s parameters in place.
+                                                               16
+            Core training loop
+            def train_pcn(model, data_loader, num_epochs, eta_infer, eta_learn,
+                            T_infer, T_learn, device=’cuda’):
+                model.to(device).train()
+                for epoch in range(num_epochs):
+                    for x_batch, y_batch in data_loader:
+                        B = x_batch.size(0)
+                        d_0 = model.dims[0]
+                        x_batch = x_batch.view(B, d_0).to(device)
+                        y_batch = F.one_hot(y_batch, num_classes=model.readout.out_features) \
+                                    .float().to(device)
+                        inputs_latents = [x_batch] + model.init_latents(B, device)
+                        weights = [layer.W for layer in model.layers] + [model.readout.weight]
+                        # INFERENCE - T_infer steps
+                        with torch.no_grad(), autocast(device_type=’cuda’):
+                            for t in range(1, T_infer + 1):
+                                errors, gain_modulated_errors = model.compute_errors(inputs_latents)
+                                y_hat          = model.readout(inputs_latents[-1])
+                                eps_sup        = y_hat - y_batch
+                                eps_L          = eps_sup @ weights[-1]
+                                errors_extended = errors + [eps_L]
+                                # Latent gradients and updates
+                                for l in range(1, model.L + 1):
+                                    grad_Xl = errors_extended[l] - \
+                                                   gain_modulated_errors[l-1] @ weights[l-1]
+                                    inputs_latents[l] -= eta_infer * grad_Xl
+                        # LEARNING - T_learn steps
+                        with torch.no_grad():
+                            for t in range(T_infer + 1, T_learn + T_infer + 1):
+                                errors, gain_modulated_errors = model.compute_errors(inputs_latents)
+                                y_hat          = model.readout(inputs_latents[-1])
+                                eps_sup        = y_hat - y_batch
+                                # Weight gradients and updates
+                                for l in range(model.L):
+                                    grad_Wl = -(gain_modulated_errors[l].T @ inputs_latents[l+1]) / B
+                                    weights[l] -= eta_learn * grad_Wl
+                                grad_Wout = eps_sup.T @ inputs_latents[-1] / B
+                                weights[-1] -= eta_learn * grad_Wout
+              For each batch, the inference phase is executed for T infer steps. This phase operates
+           under torch.no grad() context, as latent variable updates are performed manually according
+           to the PCN rules, not via PyTorch’s autograd. The autocast context manager is also used
+           here, enabling mixed-precision computations on compatible CUDA hardware. In each inference
+           step:
+              1. The model.compute errors method is called to calculate the current prediction errors
+                  (l)                            (l)
+                 E andgain-modulated errors H      for the generative layers (0 ≤ l < L).
+                                          ˆ             sup
+              2. The supervised prediction Y and error E   are computed.
+              3. The error signal for the top latent layer, E(L) = EsupWout, is calculated. This notation
+                                  (L)
+                 aligns with how ε   was defined for the supervised algorithm to use the general latent
+                 update rule. The full list of errors [E(0),...,E(L)] is assembled in errors extended.
+                                                       17
+                  4. Each latent variable X(l) (for 1 ≤ l ≤ L) is updated using the formula X(l) ← X(l) −
+                               (l)      (l−1)    (l−1)
+                      ηinfer(E    −H W ),whichcorrespondstoline 15–16 of Algorithm 3.
+                   Following inference, the learning phase adjusts the model weights for T learn steps, also
+               under torch.no grad(). The latent variables inputs latents remain fixed at their values
+               from the end of the inference phase. In each of these T learn steps:
+                  1. The generative errors E(l), gain-modulated errors H(l), and the supervised error Esup are
+                      recomputed. This is essential because the model weights (elements of the weights list)
+                      are updated within this loop, and thus the predictions and errors change accordingly.
+                  2. The generative weight matrices W(l) (for 0 ≤ l < L) are updated. The gradient G(l) =
+                                                                                                                                 W
+                         1   (l)⊤   (l+1)                                                                (l)         (l)            (l)
+                      −BH X               is computed, and the weights are adjusted: W                       ←W −ηlearnGW.
+                      This corresponds to lines 25–26 of Algorithm 3.
+                                                                out                                             out     1   sup⊤   (L)
+                  3. Similarly, the readout weights W               are updated using their gradient G              = E X ,
+                                                                                                                W B
+                      as per lines 30–31 of Algorithm 3.
+               5.5      Results and observations
+               The model was trained in Google Colab on an NVIDIA L4 GPU, running the accompanying
+               Python notebook [20]. Training for just 4 epochs took 4 minutes. Yet the test performance
+               scores in Table 1 are phenomenal. In fact, the top-1 accuracy (percentage correct) comfortably
+               tops the leaderboard on Papers With Code at the time of writing (May 29, 2025)—the previous
+               record of 99.5% having been set by the vision transformer ViT-H/14 in 2020.
+                                                           Top-1 accuracy         99.92%
+                                                           Top-3 accuracy         99.99%
+                                        Table 1: PCN test accuracies after 4 epochs of training
+               The batch-averaged energy trajectories recorded during training are depicted in Figure 3.
+               Disclosure. The experiment was virtually one-shot. The rates were initially set to η                              =0.1
+                                                                                                                           infer
+               and ηlearn = 0.001 for the very first run. Monitoring the batch-averaged energy trajectories
+               during training, some batches displayed unstable inference while learning was generally slow.
+               Consequently, the inference rate was cut in half to ηinfer = 0.05 and the learning rate was
+               quintupled to η           = 0.005 for the second run, which stabilized training and led to the test
+                                   learn
+               performance above on the first try. Neither the model architecture nor the hyperparameters
+               were tuned for performance in any way or at any point. In order to prevent data-leakage from
+               the test set to validation, the experiment terminated here. (Observe that CIFAR-10 does not
+               include a separate validation set.) The trained weights are publicly available [20].
+                   This little experiment demonstrates once more that predictive coding networks can be
+               trained end-to-end on a basic vision task using local, biologically plausible update rules. While
+               generally not yet competitive with state-of-the-art deep learning methods in terms of scope
+               and, depending on task, raw accuracy, PCNs offer an intriguing model of computation with
+               sound theoretical and practical motivations.
+                   In view of the disclosure above, the author has no idea whether a much smaller architecture
+               (or different hyperparameters) might achieve similar performance. We leave it to the curious
+               reader to tune the model and its training for that perfect 100% score. Happy hunting! ,
+                                                                          18
+     Figure 3: Partial zoom-in views of the batch-averaged energy trajectories recorded during
+     training. The first plot shows the mean trajectories over all batches (equivalently, all samples)
+     for each epoch, as well as the shaded areas of one standard deviation. The second plot shows
+     the trajectories for individual batches. Coloring is by epoch. The full, interactive plots can be
+     found in the Python notebook.
+                         19
+            References
+             [1] Nick Alonso. Predictive coding: A brief introduction and review for machine learning
+                 researchers, 2022. Blog post. URL: https://neuralnetnick.com/2022/12/28/.
+             [2] Nick Alonso, Beren Millidge, Jeff Krichmar, and Emre Neftci. A theoretical framework
+                 for inference learning.  In Proceedings of the 36th International Conference on Neural
+                 Information Processing Systems, volume 36, pages 37335–37348, 2022. URL: https://
+                 dl.acm.org/doi/10.5555/3600270.3602976.
+             [3] Horace B. Barlow. Possible principles underlying the transformation of sensory messages.
+                 In W. A. Rosenblith, editor, Sensory Communication, pages 217–234. MIT Press, Cam-
+                 bridge, MA, 1961.
+             [4] Andre M. Bastos, W. Martin Usrey, Rick A. Adams, George R. Mangun, Pascal Fries,
+                 and Karl J. Friston. Canonical microcircuits for predictive coding. Neuron, 76(4):695–711,
+                 2012. doi:10.1016/j.neuron.2012.10.038.
+             [5] C. Caucheteux, A. Gramfort, and JR King. Evidence of a predictive coding hierarchy in
+                 the human brain listening to speech. Nature Human Behaviour, 7:430–441, 2023. doi:
+                 10.1038/s41562-022-01516-2.
+             [6] Mike Davies, Narayan Srinivasa, Tsung-Han Lin, Gautham Chinya, Yongqiang Cao,
+                 Sri Harsha Choday, George Dimou, Harish Joshi, Nabil Imam, Shweta Jain, et al. Loihi: A
+                 neuromorphic manycore processor with on-chip learning. IEEE Micro, 38(1):82–99, 2018.
+                 doi:10.1109/MM.2018.112130359.
+             [7] Simon Frieder and Thomas Lukasiewicz. (Non-)Convergence results for predictive coding
+                 networks. In Kamalika Chaudhuri, Stefanie Jegelka, Le Song, Csaba Szepesvari, Gang Niu,
+                 and Sivan Sabato, editors, Proceedings of the 39th International Conference on Machine
+                 Learning, volume 162 of Proceedings of Machine Learning Research, pages 6793–6810, 2022.
+                 URL: https://proceedings.mlr.press/v162/frieder22a.html.
+             [8] Karl Friston. A theory of cortical responses. Philosophical Transactions of the Royal
+                 Society B: Biological Sciences, 360(1456):815–836, 2005. doi:10.1098/rstb.2005.1622.
+             [9] Karl Friston. The free-energy principle: a unified brain theory? Nature Reviews Neuro-
+                 science, 11(2):127–138, 2010. doi:10.1038/nrn2787.
+            [10] Richard L. Gregory. Perceptions as hypotheses. Philosophical Transactions of the Royal
+                 Society of London B: Biological Sciences, 290(1038):181–197, 1980. doi:10.1098/rstb.
+                 1980.0090.
+            [11] David Ha and Jurgen¨   Schmidhuber. World models. CoRR, abs/1803.10122, 2018. URL:
+                 http://arxiv.org/abs/1803.10122.
+            [12] Hermann von Helmholtz. Treatise on Physiological Optics, Volume III: Concerning the
+                 perceptions in general. Dover, New York, 1867. Translated by J. P. C. Southall, 3rd ed.,
+                 1962.
+            [13] Georg B. Keller and Thomas D. Mrsic-Flogel. Predictive processing: A canonical cortical
+                 computation. Neuron, 100(2):424–435, 2018. doi:10.1016/j.neuron.2018.10.003.
+                                                           20
+                   [14] Alex Krizhevsky.                      Learning multiple layers of features from tiny images.                                                  Techni-
+                           cal report, University of Toronto, 2009.                                 URL: https://www.cs.toronto.edu/ kriz/
+                                                                                                                                                                       ~
+                           learning-features-2009-TR.pdf.
+                   [15] William Lotter, Gabriel Kreiman, and David Cox. Deep predictive coding networks for
+                           video prediction and unsupervised learning. In International Conference on Learning Rep-
+                           resentations (ICLR), 2017. URL: https://arxiv.org/abs/1605.08104.
+                   [16] Ankur Mali, Tommaso Salvatori, and Alexander Ororbia. Tight stability, convergence,
+                           and robustness bounds for predictive coding networks. 2024. doi:10.48550/arXiv.2410.
+                           04708.
+                   [17] Beren                Millidge.                         Predictive               coding            as         backprop               and           natu-
+                           ral       gradients,              2020.                  Blog          post.                  URL:           https://www.beren.io/
+                           2020-09-12-Predictive-Coding-As-Backprop-And-Natural-Gradients/.
+                   [18] Beren Millidge, Anil K. Seth, and Christopher L. Buckley. Predictive coding: a theoretical
+                           and experimental review. 2021. URL: https://arxiv.org/abs/2107.12979.
+                   [19] Beren Millidge, Alexander Tschantz, and Christopher L. Buckley.                                                                 Predictive cod-
+                           ing approximates backprop along arbitrary computation graphs. Neural Computation,
+                           34:1329–1368, 2022. doi:10.1162/neco_a_01497.
+                   [20] Monadillo. An introduction to predictive coding networks for machine learning, 2025.
+                           GitHub repository containing the following supplements to this document: Python note-
+                           book and model weights. URL: https://github.com/Monadillo/pcn-intro.
+                   [21] David Mumford. On the computational architecture of the neocortex. ii. the role of cortico-
+                           cortical loops. Biological Cybernetics, 66(3):241–251, 1992. doi:10.1007/BF00198477.
+                   [22] Antony W. N’dri, William Gebhardt, C´eline Teuli`ere, Fleur Zeldenrust, Rajesh P. N. Rao,
+                           Jochen Triesch, and Alexander Ororbia. Predictive coding with spiking neural networks:
+                           a survey. 2024. URL: https://arxiv.org/abs/2409.05386.
+                   [23] Rajesh P. N. Rao and Dana H. Ballard. Predictive coding in the visual cortex: a functional
+                           interpretation of some extra-classical receptive-field effects. Nature neuroscience, 2(1):79–
+                           87, 1999. doi:10.1038/4580.
+                   [24] Tommaso Salvatori, Yuhang Song, Yordan Yordanov, Beren Millidge, Zhenghua Xu, Lei
+                           Sha, Cornelius Emde, Rafal Bogacz, and Thomas Lukasiewicz. A stable, fast, and fully
+                           automatic learning algorithm for predictive coding networks. In International Conference
+                           on Learning Representations, 2024. doi:10.48550/arXiv.2212.00720.
+                   [25] Jurgen¨          Schmidhuber. Learning factorial codes by predictability minimization. Neural
+                           Computation, 4(6):863–879, 1992. doi:10.1162/neco.1992.4.6.863.
+                   [26] Stewart Shipp. Neural elements for predictive coding. Frontiers in Psychology, 7:1792,
+                           2016. doi:10.3389/fpsyg.2016.01792.
+                   [27] Yuhang Song, Thomas Lukasiewicz, Zhenghua Xu, and Rafal Bogacz. Can the brain
+                           do backpropagation? — exact implementation of backpropagation in predictive coding
+                           networks. In H. Larochelle, M. Ranzato, R. Hadsell, M.F. Balcan, and H. Lin, editors, Ad-
+                           vances in Neural Information Processing Systems, volume 33, pages 22566–22579. Curran
+                           Associates, Inc., 2020. URL: https://proceedings.neurips.cc/paper_files/paper/
+                           2020/file/fec87a37cdeec1c6ecf8181c0aa2d3bf-Paper.pdf.
+                                                                                                 21
+     [28] M.W. Spratling. Reconciling predictive coding and biased competition models of cortical
+       function. Frontiers in Computational Neuroscience, 2:4, 2008. doi:10.3389/neuro.10.
+       004.2008.
+     [29] Alexander Tschantz, Beren Millidge, Anil K. Seth, and Christopher L. Buckley. Hybrid
+       predictive coding: Inferring, fast and slow. PLOS Computational Biology, 19(8):1–31, 08
+       2023. doi:10.1371/journal.pcbi.1011280.
+     [30] K. S. Walsh, D. P. McGovern, A. Clark, and R. G. O’Connell. Evaluating the neurophys-
+       iological evidence for predictive processing as a model of perception. Ann N Y Acad Sci,
+       464(1):242–268, 3 2020. doi:10.1111/nyas.14321.
+     [31] James C. R. Whittington and Rafal Bogacz. An approximation of the error backprop-
+       agation algorithm in a predictive coding network with local hebbian synaptic plasticity.
+       Neural Computation, 29:1229–1262, 2017. doi:10.1162/NECO_a_00949.
+                         22

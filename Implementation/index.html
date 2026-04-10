@@ -40,6 +40,20 @@
       <input id="cfgLearnLr" type="number" value="0.0001" min="0.0000001" step="0.00001" />
       <label for="cfgGradClip">Gradient clip</label>
       <input id="cfgGradClip" type="number" value="3" min="0.01" step="0.1" />
+      <label for="cfgHiddenLayers">Hidden layers</label>
+      <input id="cfgHiddenLayers" type="number" value="2" min="1" max="4" step="1" />
+      <label for="cfgHidden1" data-hidden-index="1">Hidden 1 neurons</label>
+      <input id="cfgHidden1" data-hidden-index="1" type="number" value="667" min="1" step="1" />
+      <label for="cfgHidden2" data-hidden-index="2">Hidden 2 neurons</label>
+      <input id="cfgHidden2" data-hidden-index="2" type="number" value="333" min="1" step="1" />
+      <label for="cfgHidden3" data-hidden-index="3">Hidden 3 neurons</label>
+      <input id="cfgHidden3" data-hidden-index="3" type="number" value="167" min="1" step="1" />
+      <label for="cfgHidden4" data-hidden-index="4">Hidden 4 neurons</label>
+      <input id="cfgHidden4" data-hidden-index="4" type="number" value="83" min="1" step="1" />
+      <label for="cfgBalanceFalseError">Balance FP/FN error</label>
+      <input id="cfgBalanceFalseError" type="checkbox" />
+      <label for="cfgFalseBalanceStrength">FP/FN balance strength</label>
+      <input id="cfgFalseBalanceStrength" type="number" value="1.5" min="0" step="0.1" />
     </section>
     <div id="debug">Wait</div>
     <canvas id="successCanvas" width="720" height="260" aria-label="Success indicator graph"></canvas>

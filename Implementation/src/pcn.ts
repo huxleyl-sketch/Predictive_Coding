@@ -26,6 +26,10 @@ export type PCNConfig = {
     };
     /** Inference steps used during epoch-end accuracy evaluation */
     evalInferSteps?: number;
+    /** Increase supervised error on the less frequent false-error type (FP vs FN) */
+    balanceFalseError?: boolean;
+    /** Strength of false-error balancing boost (0 disables effect) */
+    falseErrorBalanceStrength?: number;
     /** Return true to cooperatively stop training early */
     stopRequested?: () => boolean;
     /** Enable verbose timing/logging for training diagnostics */
@@ -115,7 +119,7 @@ export class PCN {
             y: tf.tensor2d([]),
         }],
     }): Promise<PCNTrainReport> {
-        this.time("Training");
+        console.time("Training");
         const epochMSE: number[] = [];
         const epochTrainAccuracy: number[] = [];
         const epochValidationAccuracy: number[] = [];
@@ -128,11 +132,15 @@ export class PCN {
         const haltOnNonFinite = input.haltOnNonFinite ?? true;
         const collectAccuracyHistory = input.collectAccuracyHistory ?? false;
         const evalInferSteps = input.evalInferSteps ?? T_infer;
+        const balanceFalseError = input.balanceFalseError ?? false;
+        const falseErrorBalanceStrength = Math.max(0, input.falseErrorBalanceStrength ?? 1);
         const stopRequested = input.stopRequested ?? (() => false);
         this.debug = input.debug ?? false;
         for (let l = 0; l < this.L; l++) {
+            this.W[l]?.dispose();
             this.W[l] = tf.variable(xavierUniform(this.D[l]!, this.D[l + 1]!));
         }
+        this.W[this.L + 1]?.dispose();
         this.W[this.L + 1] = tf.variable(xavierUniform(this.D[this.L + 1]!, this.D[this.L]!));
 
         let shouldStop = false;
@@ -150,18 +158,18 @@ export class PCN {
                 const B = batch.x.shape[0]!;
                 const negInvB = tf.scalar(-1 / B);
                 const invB = tf.scalar(1 / B);
-                this.H[0] = zeros(B, this.D[0]!);
-                this.H[this.L + 1] = zeros(B, this.D[this.L + 1]!);
+                this.keepAssign(this.H, 0, zeros(B, this.D[0]!));
+                this.keepAssign(this.H, this.L + 1, zeros(B, this.D[this.L + 1]!));
 
                 /** Initialise Values */
                 for (let l = 1; l <= this.L; l++) {
                     /** Small Random Values */
-                    this.X[l] = xavierUniform(B, this.D[l]!);
+                    this.keepAssign(this.X, l, xavierUniform(B, this.D[l]!));
                 }
 
                 /** Input Batch Fixing */
                 this.X[0] = batch.x;
-                const Y = batch.y;
+                const Y = batch.y as tf.Tensor2D;
                 this.time("Inference");
                 /** Inference Update Loop */
                 for (let t = 1; t <= T_infer; t++) {
@@ -175,10 +183,13 @@ export class PCN {
                             this.keepAssign(this.H, l, tf.mul(this.E[l], this.df(A_l)));
                         }
 
-                        const Yhat = tf.matMul(this.X[this.L], this.W[this.L + 1], false, true);
+                        const Yhat = tf.matMul(this.X[this.L], this.W[this.L + 1], false, true) as tf.Tensor2D;
 
-                        const E_sup = tf.sub(Yhat, Y);
-                        this.keepAssign(this.E, this.L, tf.matMul(E_sup, this.W[this.L + 1]));
+                        const E_sup = tf.sub(Yhat, Y) as tf.Tensor2D;
+                        const E_supWeighted = balanceFalseError
+                            ? weightByFalseImbalance(E_sup, Y, Yhat, falseErrorBalanceStrength)
+                            : E_sup;
+                        this.keepAssign(this.E, this.L, tf.matMul(E_supWeighted, this.W[this.L + 1]));
 
                         for (let l = 1; l <= this.L; l++) {
                             /** Gradients of Latents */
@@ -203,10 +214,13 @@ export class PCN {
                             const G_wl = tf.clipByValue(G_wlRaw, -gradientClipValue, gradientClipValue);
                             this.W[l].assign(tf.sub(this.W[l], tf.mul(eta_learn, G_wl)));
                         }
-                        const Yhat = tf.matMul(this.X[this.L], this.W[this.L + 1], false, true);
-                        const E_sup = tf.sub(Yhat, Y);
+                        const Yhat = tf.matMul(this.X[this.L], this.W[this.L + 1], false, true) as tf.Tensor2D;
+                        const E_sup = tf.sub(Yhat, Y) as tf.Tensor2D;
+                        const E_supWeighted = balanceFalseError
+                            ? weightByFalseImbalance(E_sup, Y, Yhat, falseErrorBalanceStrength)
+                            : E_sup;
                         /** Average Gradients of output weight */
-                        const G_w_outRaw = tf.mul(invB, tf.matMul(E_sup.transpose(), this.X[this.L]));
+                        const G_w_outRaw = tf.mul(invB, tf.matMul(E_supWeighted.transpose(), this.X[this.L]));
                         const G_w_out = tf.clipByValue(G_w_outRaw, -gradientClipValue, gradientClipValue);
                         this.W[this.L + 1].assign(tf.sub(this.W[this.L + 1], tf.mul(eta_learn, G_w_out)));
                     });
@@ -261,7 +275,7 @@ export class PCN {
             }
             if (shouldStop) break;
         }
-        this.timeEnd("Training");
+        console.timeEnd("Training");
         return { epochMSE, epochTrainAccuracy, epochValidationAccuracy };
     }
 
@@ -269,7 +283,7 @@ export class PCN {
         this.X[0] = xBatch;
         for (let l = 1; l <= this.L; l++) {
             /** Small Random Values */
-            this.X[l] = xavierUniform(xBatch.shape[0], this.D[l]!);
+            this.keepAssign(this.X, l, xavierUniform(xBatch.shape[0], this.D[l]!));
         }
         /** Inference Update Loop */
         for (let t = 1; t <= T_infer; t++) {
@@ -316,6 +330,28 @@ export class PCN {
         prediction.dispose();
         return score;
     }
+
+    dispose() {
+        for (const w of this.W) {
+            w?.dispose();
+        }
+        this.W = [];
+
+        for (const x of this.X) {
+            x?.dispose();
+        }
+        this.X = [];
+
+        for (const e of this.E) {
+            e?.dispose();
+        }
+        this.E = [];
+
+        for (const h of this.H) {
+            h?.dispose();
+        }
+        this.H = [];
+    }
 }
 
 function zeros(rows: number, cols: number): tf.Tensor2D {
@@ -330,6 +366,43 @@ function xavierUniform(rows: number, cols: number): tf.Tensor2D {
 function mapTargetToSigned(target: tf.Tensor2D): tf.Tensor2D {
     // Maps [0,1] labels into [-1,1] so error can be measured on the same range.
     return tf.sub(tf.mul(target, 2), 1) as tf.Tensor2D;
+}
+
+function weightByFalseImbalance(
+    supervisedError: tf.Tensor2D,
+    target: tf.Tensor2D,
+    prediction: tf.Tensor2D,
+    strength: number,
+): tf.Tensor2D {
+    // Binary convention in this project:
+    // class 0 = positive, class 1 = abstain/negative.
+    // We compute FP/FN imbalance on current batch predictions and only boost the
+    // smaller false-error type to discourage collapse into one failure mode.
+    const predClass = tf.argMax(prediction, 1);
+    const targetClass = tf.argMax(target, 1);
+
+    const predPositive = tf.equal(predClass, 0);
+    const targetPositive = tf.equal(targetClass, 0);
+
+    const falsePos = tf.sum(
+        tf.cast(tf.logicalAnd(predPositive, tf.logicalNot(targetPositive)), "float32"),
+    );
+    const falseNeg = tf.sum(
+        tf.cast(tf.logicalAnd(tf.logicalNot(predPositive), targetPositive), "float32"),
+    );
+
+    const totalFalsePlusOne = tf.add(tf.add(falsePos, falseNeg), tf.scalar(1));
+    const posBoost = tf.div(tf.relu(tf.sub(falsePos, falseNeg)), totalFalsePlusOne);
+    const negBoost = tf.div(tf.relu(tf.sub(falseNeg, falsePos)), totalFalsePlusOne);
+    const scale = tf.scalar(Math.max(0, strength));
+
+    const classWeights = tf.add(
+        tf.tensor1d([1, 1]),
+        tf.mul(scale, tf.stack([posBoost, negBoost]) as tf.Tensor1D),
+    );
+    const perSampleWeight = tf.sum(tf.mul(target, classWeights), 1, true);
+
+    return tf.mul(supervisedError, perSampleWeight);
 }
 
 function tensorAccuracy(predictions: tf.Tensor2D, target: tf.Tensor2D): number {

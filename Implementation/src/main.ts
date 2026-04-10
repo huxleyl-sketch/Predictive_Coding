@@ -24,6 +24,13 @@ const cfgLearnSteps = document.getElementById("cfgLearnSteps") as HTMLInputEleme
 const cfgInferLr = document.getElementById("cfgInferLr") as HTMLInputElement | null;
 const cfgLearnLr = document.getElementById("cfgLearnLr") as HTMLInputElement | null;
 const cfgGradClip = document.getElementById("cfgGradClip") as HTMLInputElement | null;
+const cfgHiddenLayers = document.getElementById("cfgHiddenLayers") as HTMLInputElement | null;
+const cfgHidden1 = document.getElementById("cfgHidden1") as HTMLInputElement | null;
+const cfgHidden2 = document.getElementById("cfgHidden2") as HTMLInputElement | null;
+const cfgHidden3 = document.getElementById("cfgHidden3") as HTMLInputElement | null;
+const cfgHidden4 = document.getElementById("cfgHidden4") as HTMLInputElement | null;
+const cfgBalanceFalseError = document.getElementById("cfgBalanceFalseError") as HTMLInputElement | null;
+const cfgFalseBalanceStrength = document.getElementById("cfgFalseBalanceStrength") as HTMLInputElement | null;
 const trainSuccessGraph = new SuccessGraph(
     document.getElementById("successCanvas") as HTMLCanvasElement | null,
     { title: "Train Accuracy", xAxisLabel: "Epoch" },
@@ -63,128 +70,182 @@ type TrainingUiConfig = {
     eta_infer: number;
     eta_learn: number;
     gradientClipValue: number;
+    hiddenLayerCount: number;
+    hiddenSizes: number[];
+    balanceFalseError: boolean;
+    falseErrorBalanceStrength: number;
 };
 
 if (debug) debug.innerText = "Ready. Click Train.";
 if (haltButton) haltButton.disabled = true;
+updateHiddenConfigVisibility();
+cfgHiddenLayers?.addEventListener("input", () => updateHiddenConfigVisibility());
 
 async function trainFromNiftyCsv() {
+    logTfMemory("Before training load");
     const ui = readTrainingConfig();
     const dataset = await loadNiftyTrainingSet('/nifty50_last_10_years.csv', ui.batchSize, ui.validationRatio);
+    let downLabelsTrain: tf.Tensor2D | null = null;
+    let downLabelsValidation: tf.Tensor2D | null = null;
+    let downTrainBatches: TrainingBatch[] = [];
+    let nextUpPcn: PCN | null = null;
+    let nextDownPcn: PCN | null = null;
+    let trainingCompleted = false;
 
-    previewX = dataset.previewX;
-    previewY = dataset.previewY;
+    try {
+        // ------------------------------------------------------------------------
+        // Dual-PCN setup:
+        // 1) upPcn   learns "Up/Flat" vs "not Up/Flat"
+        // 2) downPcn learns "Down"    vs "not Down"
+        //
+        // We keep 2 output neurons for each PCN:
+        //   [positive_class, negative_class]
+        // This keeps compatibility with existing argmax-based accuracy/visualization.
+        // ------------------------------------------------------------------------
 
-    // ------------------------------------------------------------------------
-    // Dual-PCN setup:
-    // 1) upPcn   learns "Up/Flat" vs "not Up/Flat"
-    // 2) downPcn learns "Down"    vs "not Down"
-    //
-    // We keep 2 output neurons for each PCN:
-    //   [positive_class, negative_class]
-    // This keeps compatibility with existing argmax-based accuracy/visualization.
-    // ------------------------------------------------------------------------
+        const upLabelsTrain = dataset.trainY;
+        const upLabelsValidation = dataset.validationY;
 
-    const upLabelsTrain = dataset.trainY;
-    const upLabelsValidation = dataset.validationY;
+        // For the DOWN model we swap the two columns:
+        //   original [Up, Down] -> [Down, Up]
+        // so column 0 is now the "positive" Down class for this model.
+        downLabelsTrain = swapBinaryOneHot(upLabelsTrain);
+        downLabelsValidation = swapBinaryOneHot(upLabelsValidation);
+        downTrainBatches = createSwappedLabelBatches(dataset.trainBatches);
 
-    // For the DOWN model we swap the two columns:
-    //   original [Up, Down] -> [Down, Up]
-    // so column 0 is now the "positive" Down class for this model.
-    const downLabelsTrain = swapBinaryOneHot(upLabelsTrain);
-    const downLabelsValidation = swapBinaryOneHot(upLabelsValidation);
-    const downTrainBatches = createSwappedLabelBatches(dataset.trainBatches);
+        const commonSetup: Omit<PCNConfig, 'data' | 'trainEvalData' | 'validationEvalData'> = {
+            epochs: ui.epochs,
+            T_infer: ui.T_infer,
+            eta_infer: ui.eta_infer,
+            T_learn: ui.T_learn,
+            eta_learn: ui.eta_learn,
+            useSignedOutputMapping: ui.useSignedOutputMapping,
+            gradientClipValue: ui.gradientClipValue,
+            balanceFalseError: ui.balanceFalseError,
+            falseErrorBalanceStrength: ui.falseErrorBalanceStrength,
+            haltOnNonFinite: ui.haltOnNonFinite,
+            debug: ui.pcnDebug,
+            collectAccuracyHistory: true,
+            evalInferSteps: Math.max(10, ui.T_infer),
+        };
 
-    const commonSetup: Omit<PCNConfig, 'data' | 'trainEvalData' | 'validationEvalData'> = {
-        epochs: ui.epochs,
-        T_infer: ui.T_infer,
-        eta_infer: ui.eta_infer,
-        T_learn: ui.T_learn,
-        eta_learn: ui.eta_learn,
-        useSignedOutputMapping: ui.useSignedOutputMapping,
-        gradientClipValue: ui.gradientClipValue,
-        haltOnNonFinite: ui.haltOnNonFinite,
-        debug: ui.pcnDebug,
-        collectAccuracyHistory: true,
-        evalInferSteps: Math.max(10, ui.T_infer),
-    };
+        const upSetup: PCNConfig = {
+            ...commonSetup,
+            stopRequested: () => haltRequested,
+            trainEvalData: { x: dataset.trainX, y: upLabelsTrain },
+            validationEvalData: { x: dataset.validationX, y: upLabelsValidation },
+            data: dataset.trainBatches,
+        };
 
-    const upSetup: PCNConfig = {
-        ...commonSetup,
-        stopRequested: () => haltRequested,
-        trainEvalData: { x: dataset.trainX, y: upLabelsTrain },
-        validationEvalData: { x: dataset.validationX, y: upLabelsValidation },
-        data: dataset.trainBatches,
-    };
+        const downSetup: PCNConfig = {
+            ...commonSetup,
+            stopRequested: () => haltRequested,
+            trainEvalData: { x: dataset.trainX, y: downLabelsTrain },
+            validationEvalData: { x: dataset.validationX, y: downLabelsValidation },
+            data: downTrainBatches,
+        };
 
-    const downSetup: PCNConfig = {
-        ...commonSetup,
-        stopRequested: () => haltRequested,
-        trainEvalData: { x: dataset.trainX, y: downLabelsTrain },
-        validationEvalData: { x: dataset.validationX, y: downLabelsValidation },
-        data: downTrainBatches,
-    };
+        const dims = [
+            dataset.inputSize,
+            ...buildHiddenSizes(ui.hiddenLayerCount, ui.hiddenSizes),
+            dataset.outputSize,
+        ];
+        nextUpPcn = new PCN(dims);
+        nextDownPcn = new PCN(dims);
 
-    const nextUpPcn = new PCN([dataset.inputSize, 16, 8, dataset.outputSize]);
-    const nextDownPcn = new PCN([dataset.inputSize, 16, 8, dataset.outputSize]);
+        console.log(
+            `Loaded ${dataset.sampleCount} samples from NIFTY50 CSV ` +
+            `(train=${dataset.trainCount}, validation=${dataset.validationCount}).`,
+        );
+        console.log(
+            `Validation baselines -> majority=${(dataset.baselines.validationMajorityAccuracy * 100).toFixed(2)}%, ` +
+            `persistence=${(dataset.baselines.validationPersistenceAccuracy * 100).toFixed(2)}%`,
+        );
+        console.log(`PCN architecture -> ${dims.join(" -> ")}`);
 
-    console.log(
-        `Loaded ${dataset.sampleCount} samples from NIFTY50 CSV ` +
-        `(train=${dataset.trainCount}, validation=${dataset.validationCount}).`,
-    );
-    console.log(
-        `Validation baselines -> majority=${(dataset.baselines.validationMajorityAccuracy * 100).toFixed(2)}%, ` +
-        `persistence=${(dataset.baselines.validationPersistenceAccuracy * 100).toFixed(2)}%`,
-    );
+        // Train both models.
+        const upReport = await nextUpPcn.Train(upSetup);
+        if (haltRequested) throw new Error(TRAIN_HALTED_ERROR);
+        const downReport = await nextDownPcn.Train(downSetup);
+        if (haltRequested) throw new Error(TRAIN_HALTED_ERROR);
 
-    // Train both models.
-    const upReport = await nextUpPcn.Train(upSetup);
-    if (haltRequested) throw new Error(TRAIN_HALTED_ERROR);
-    const downReport = await nextDownPcn.Train(downSetup);
-    if (haltRequested) throw new Error(TRAIN_HALTED_ERROR);
+        // Keep previous model alive until we have a new successfully trained one.
+        upPcn?.dispose();
+        downPcn?.dispose();
+        upPcn = nextUpPcn;
+        downPcn = nextDownPcn;
+        trainingCompleted = true;
 
-    upPcn = nextUpPcn;
-    downPcn = nextDownPcn;
+        // Replace preview tensors with cloned validation tensors from this run.
+        previewX?.dispose();
+        previewY?.dispose();
+        previewX = dataset.validationX.clone();
+        previewY = dataset.validationY.clone();
 
-    // Graphs: show average of both models' training diagnostics.
-    errorGraph.setHistory(averageHistories(upReport.epochMSE, downReport.epochMSE));
-    trainSuccessGraph.setHistory(averageHistories(upReport.epochTrainAccuracy, downReport.epochTrainAccuracy));
-    validationSuccessGraph.setHistory(
-        averageHistories(upReport.epochValidationAccuracy, downReport.epochValidationAccuracy),
-    );
-    validationSuccessGraph.setBaselines([
-        { label: "Majority", value: dataset.baselines.validationMajorityAccuracy, color: "#f59e0b" },
-        { label: "Persistence", value: dataset.baselines.validationPersistenceAccuracy, color: "#6366f1" },
-    ]);
+        // Graphs: show average of both models' training diagnostics.
+        errorGraph.setHistory(averageHistories(upReport.epochMSE, downReport.epochMSE));
+        trainSuccessGraph.setHistory(averageHistories(upReport.epochTrainAccuracy, downReport.epochTrainAccuracy));
+        validationSuccessGraph.setHistory(
+            averageHistories(upReport.epochValidationAccuracy, downReport.epochValidationAccuracy),
+        );
+        validationSuccessGraph.setBaselines([
+            { label: "Majority", value: dataset.baselines.validationMajorityAccuracy, color: "#f59e0b" },
+            { label: "Persistence", value: dataset.baselines.validationPersistenceAccuracy, color: "#6366f1" },
+        ]);
 
-    // Post-train validation pass using *combined* decision from both PCNs.
-    const upPred = nextUpPcn.GenerateMapped(previewX, 50, 0.05);
-    const downPred = nextDownPcn.GenerateMapped(previewX, 50, 0.05);
+        // Post-train validation pass using *combined* decision from both PCNs.
+        const upPred = nextUpPcn.GenerateMapped(previewX, 50, 0.05);
+        const downPred = nextDownPcn.GenerateMapped(previewX, 50, 0.05);
 
-    const combinedPredClass = combineDualPcnVotes(upPred, downPred);
-    const upPredClass = classIds(upPred);
-    const downPredClass = classIds(downPred);
-    const upTargetClass = classIds(previewY);
-    const downTargetClass = classIdsForDownModel(previewY);
+        const combinedPredClass = combineDualPcnVotes(upPred, downPred);
+        const upPredClass = classIds(upPred);
+        const downPredClass = classIds(downPred);
+        const upTargetClass = classIds(previewY);
+        const downTargetClass = classIdsForDownModel(previewY);
 
-    interpretationGraph.setDualPcnBinary(
-        upPredClass,
-        upTargetClass,
-        downPredClass,
-        downTargetClass,
-        { upPositiveClassName: "Up/Flat", downPositiveClassName: "Down" },
-    );
+        interpretationGraph.setDualPcnBinary(
+            upPredClass,
+            upTargetClass,
+            downPredClass,
+            downTargetClass,
+            { upPositiveClassName: "Up/Flat", downPositiveClassName: "Down" },
+        );
 
-    const postTrainSuccess = classAccuracy(combinedPredClass, upTargetClass);
-    validationSuccessGraph.record(postTrainSuccess);
+        const postTrainSuccess = classAccuracy(combinedPredClass, upTargetClass);
+        validationSuccessGraph.record(postTrainSuccess);
 
-    upPred.dispose();
-    downPred.dispose();
+        upPred.dispose();
+        downPred.dispose();
 
-    if (debug) {
-        debug.innerText =
-            `Post-train validation: ${(postTrainSuccess * 100).toFixed(2)}% ` +
-            `(majority ${(dataset.baselines.validationMajorityAccuracy * 100).toFixed(2)}%)`;
+        if (debug) {
+            debug.innerText =
+                `Post-train validation: ${(postTrainSuccess * 100).toFixed(2)}% ` +
+                `(majority ${(dataset.baselines.validationMajorityAccuracy * 100).toFixed(2)}%)`;
+        }
+    } finally {
+        // Dispose temporary tensors created for down-model label swapping.
+        downLabelsTrain?.dispose();
+        downLabelsValidation?.dispose();
+        for (const batch of downTrainBatches) {
+            batch.y.dispose();
+        }
+
+        // Dispose dataset tensors; preview tensors are cloned above.
+        for (const batch of dataset.trainBatches) {
+            batch.x.dispose();
+            batch.y.dispose();
+        }
+        dataset.trainX.dispose();
+        dataset.trainY.dispose();
+        dataset.validationX.dispose();
+        dataset.validationY.dispose();
+
+        // If this run failed/halted before replacing active models, release new models.
+        if (!trainingCompleted) {
+            nextUpPcn?.dispose();
+            nextDownPcn?.dispose();
+        }
+        logTfMemory("After training cleanup");
     }
 }
 
@@ -256,6 +317,7 @@ generateButton?.addEventListener('click', () => {
 
     upPred.dispose();
     downPred.dispose();
+    logTfMemory("After generate");
 
     if (debug) debug.innerText = `Generate success: ${(success * 100).toFixed(2)}%`;
 });
@@ -280,7 +342,29 @@ function readTrainingConfig(): TrainingUiConfig {
         eta_infer: numberOrDefault(cfgInferLr, 0.01, 1e-6),
         eta_learn: numberOrDefault(cfgLearnLr, 0.0001, 1e-7),
         gradientClipValue: numberOrDefault(cfgGradClip, 3, 0.01),
+        hiddenLayerCount: intOrDefault(cfgHiddenLayers, 2, 1, 4),
+        hiddenSizes: [
+            intOrDefault(cfgHidden1, 667, 1),
+            intOrDefault(cfgHidden2, 333, 1),
+            intOrDefault(cfgHidden3, 167, 1),
+            intOrDefault(cfgHidden4, 83, 1),
+        ],
+        balanceFalseError: checkboxOrDefault(cfgBalanceFalseError, false),
+        falseErrorBalanceStrength: numberOrDefault(cfgFalseBalanceStrength, 1.5, 0),
     };
+}
+
+function buildHiddenSizes(hiddenLayerCount: number, hiddenSizes: number[]): number[] {
+    return hiddenSizes.slice(0, hiddenLayerCount).map((v) => Math.max(1, Math.floor(v)));
+}
+
+function updateHiddenConfigVisibility() {
+    const count = intOrDefault(cfgHiddenLayers, 2, 1, 4);
+    const rows = document.querySelectorAll<HTMLElement>("[data-hidden-index]");
+    for (const row of rows) {
+        const idx = Number(row.dataset.hiddenIndex ?? "0");
+        row.style.display = idx >= 1 && idx <= count ? "" : "none";
+    }
 }
 
 function checkboxOrDefault(input: HTMLInputElement | null, fallback: boolean): boolean {
@@ -310,6 +394,13 @@ function numberOrDefault(
     if (min !== undefined) value = Math.max(min, value);
     if (max !== undefined) value = Math.min(max, value);
     return value;
+}
+
+function logTfMemory(label: string) {
+    const m = tf.memory();
+    console.log(
+        `${label} | tensors=${m.numTensors}, bytes=${Math.round(m.numBytes / (1024 * 1024) * 100) / 100} MB`,
+    );
 }
 
 function classIdsForDownModel(upDownLabels: tf.Tensor2D): Int32Array {
