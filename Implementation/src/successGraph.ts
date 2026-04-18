@@ -243,13 +243,13 @@ export class ErrorGraph {
 export class InterpretationGraph {
     private canvas: HTMLCanvasElement | null;
     private ctx: CanvasRenderingContext2D | null;
-    private panels: {
+    private panel: {
         title: string;
-        matrix: [[number, number], [number, number]];
+        matrix: number[][];
         total: number;
         accuracy: number;
-        positiveClassName: string;
-    }[] = [];
+        labels: string[];
+    } | null = null;
 
     constructor(canvas: HTMLCanvasElement | null) {
         this.canvas = canvas;
@@ -259,30 +259,9 @@ export class InterpretationGraph {
     setFromClasses(
         predicted: ArrayLike<number>,
         target: ArrayLike<number>,
-        labels: string[] = ["Positive", "Abstain"],
+        labels: string[] = ["Up", "Flat", "Down"],
     ) {
-        const positiveClassName = labels[0] ?? "Positive";
-        this.panels = [this.buildBinaryPanel("Confusion Matrix", predicted, target, positiveClassName)];
-        this.render();
-    }
-
-    setDualPcnBinary(
-        upPredicted: ArrayLike<number>,
-        upTarget: ArrayLike<number>,
-        downPredicted: ArrayLike<number>,
-        downTarget: ArrayLike<number>,
-        options?: {
-            upPositiveClassName?: string;
-            downPositiveClassName?: string;
-        },
-    ) {
-        const upPositiveClassName = options?.upPositiveClassName ?? "Up/Flat";
-        const downPositiveClassName = options?.downPositiveClassName ?? "Down";
-
-        this.panels = [
-            this.buildBinaryPanel("UP PCN", upPredicted, upTarget, upPositiveClassName),
-            this.buildBinaryPanel("DOWN PCN", downPredicted, downTarget, downPositiveClassName),
-        ];
+        this.panel = this.buildConfusionPanel("Confusion Matrix", predicted, target, labels);
         this.render();
     }
 
@@ -298,55 +277,45 @@ export class InterpretationGraph {
         ctx.font = "12px IBM Plex Sans, sans-serif";
 
         ctx.fillStyle = "#293241";
-        ctx.fillText("Interpretation: PCN Confusion Matrices", 10, 16);
-        ctx.fillText("Rows = Actual, Columns = Predicted (Positive vs Abstain)", 10, 32);
+        ctx.fillText("Interpretation: Confusion Matrix", 10, 16);
+        ctx.fillText("Rows = Actual, Columns = Predicted", 10, 32);
 
-        if (this.panels.length === 0) {
+        if (!this.panel) {
             ctx.fillStyle = "#6f7784";
             ctx.fillText("No prediction data yet.", 10, 52);
             return;
         }
 
-        const panelTop = 38;
-        const panelBottom = 8;
-        const panelHeight = height - panelTop - panelBottom;
-        const gap = 12;
-        const sidePad = 10;
-
-        if (this.panels.length === 1) {
-            this.drawBinaryPanel(this.panels[0]!, sidePad, panelTop, width - sidePad * 2, panelHeight);
-            return;
-        }
-
-        const panelWidth = (width - sidePad * 2 - gap) / 2;
-        this.drawBinaryPanel(this.panels[0]!, sidePad, panelTop, panelWidth, panelHeight);
-        this.drawBinaryPanel(this.panels[1]!, sidePad + panelWidth + gap, panelTop, panelWidth, panelHeight);
+        this.drawConfusionPanel(this.panel, 10, 38, width - 20, height - 46);
     }
 
-    private buildBinaryPanel(
+    private buildConfusionPanel(
         title: string,
         predicted: ArrayLike<number>,
         target: ArrayLike<number>,
-        positiveClassName: string,
+        labels: string[],
     ) {
         const n = Math.min(predicted.length, target.length);
-        const matrix: [[number, number], [number, number]] = [
-            [0, 0],
-            [0, 0],
-        ];
+        const classCount = Math.max(
+            labels.length,
+            maxClassIndex(predicted, n) + 1,
+            maxClassIndex(target, n) + 1,
+            1,
+        );
+        const matrix = Array.from({ length: classCount }, () => new Array<number>(classCount).fill(0));
+        const safeLabels = new Array(classCount).fill("").map((_, i) => labels[i] ?? `Class ${i}`);
 
         let total = 0;
         let matches = 0;
 
         for (let i = 0; i < n; i++) {
-            const p = Number(predicted[i]);
-            const t = Number(target[i]);
+            const p = Math.floor(Number(predicted[i]));
+            const t = Math.floor(Number(target[i]));
             if (!Number.isFinite(p) || !Number.isFinite(t)) continue;
-            const pBin: 0 | 1 = p === 0 ? 0 : 1;
-            const tBin: 0 | 1 = t === 0 ? 0 : 1;
-            matrix[tBin][pBin] += 1;
+            if (p < 0 || p >= classCount || t < 0 || t >= classCount) continue;
+            matrix[t]![p]! += 1;
             total++;
-            if (pBin === tBin) matches++;
+            if (p === t) matches++;
         }
 
         return {
@@ -354,17 +323,17 @@ export class InterpretationGraph {
             matrix,
             total,
             accuracy: total > 0 ? matches / total : 0,
-            positiveClassName,
+            labels: safeLabels,
         };
     }
 
-    private drawBinaryPanel(
+    private drawConfusionPanel(
         panel: {
             title: string;
-            matrix: [[number, number], [number, number]];
+            matrix: number[][];
             total: number;
             accuracy: number;
-            positiveClassName: string;
+            labels: string[];
         },
         x: number,
         y: number,
@@ -374,21 +343,22 @@ export class InterpretationGraph {
         if (!this.ctx) return;
         const ctx = this.ctx;
 
-        const labelPadLeft = 70;
-        const labelPadTop = 20;
+        const classCount = panel.matrix.length;
+        const labelPadLeft = 84;
+        const labelPadTop = 28;
         const labelPadBottom = 28;
         const gridTop = y + 24 + labelPadTop;
         const gridAvailableH = h - 24 - labelPadTop - labelPadBottom;
         const gridAvailableW = w - labelPadLeft - 12;
         const gridSize = Math.max(20, Math.min(gridAvailableW, gridAvailableH));
-        const cellSize = gridSize / 2;
+        const cellSize = gridSize / Math.max(1, classCount);
         const gridX = x + labelPadLeft;
         const gridY = gridTop;
 
         ctx.fillStyle = "#1f2937";
         ctx.textAlign = "left";
         ctx.textBaseline = "alphabetic";
-        ctx.fillText(`${panel.title} (Positive=${panel.positiveClassName})`, x + 4, y + 14);
+        ctx.fillText(panel.title, x + 4, y + 14);
 
         ctx.fillStyle = "#374151";
         ctx.textAlign = "center";
@@ -400,16 +370,13 @@ export class InterpretationGraph {
         ctx.fillText("Actual", 0, 0);
         ctx.restore();
 
-        const maxCell = Math.max(
-            panel.matrix[0][0],
-            panel.matrix[0][1],
-            panel.matrix[1][0],
-            panel.matrix[1][1],
-            1,
-        );
+        let maxCell = 1;
+        for (const row of panel.matrix) {
+            for (const count of row) maxCell = Math.max(maxCell, count);
+        }
 
-        for (let r = 0; r < 2; r++) {
-            for (let c = 0; c < 2; c++) {
+        for (let r = 0; r < classCount; r++) {
+            for (let c = 0; c < classCount; c++) {
                 const count = panel.matrix[r]![c]!;
                 const strength = count / maxCell;
                 const cx = gridX + c * cellSize;
@@ -427,17 +394,16 @@ export class InterpretationGraph {
             }
         }
 
-        const classLabels = ["Positive", "Abstain"];
         ctx.fillStyle = "#374151";
         ctx.textBaseline = "alphabetic";
         ctx.textAlign = "center";
-        for (let c = 0; c < 2; c++) {
-            ctx.fillText(classLabels[c]!, gridX + c * cellSize + cellSize / 2, gridY - 6);
+        for (let c = 0; c < classCount; c++) {
+            ctx.fillText(panel.labels[c]!, gridX + c * cellSize + cellSize / 2, gridY - 6);
         }
 
         ctx.textAlign = "right";
-        for (let r = 0; r < 2; r++) {
-            ctx.fillText(classLabels[r]!, gridX - 6, gridY + r * cellSize + cellSize / 2 + 4);
+        for (let r = 0; r < classCount; r++) {
+            ctx.fillText(panel.labels[r]!, gridX - 6, gridY + r * cellSize + cellSize / 2 + 4);
         }
 
         ctx.textAlign = "left";
@@ -445,6 +411,15 @@ export class InterpretationGraph {
         ctx.fillText(`Accuracy: ${(panel.accuracy * 100).toFixed(2)}%`, x + 4, y + h - 8);
         ctx.fillText(`Samples: ${panel.total}`, x + w * 0.52, y + h - 8);
     }
+}
+
+function maxClassIndex(values: ArrayLike<number>, n: number): number {
+    let max = 0;
+    for (let i = 0; i < n; i++) {
+        const value = Math.floor(Number(values[i]));
+        if (Number.isFinite(value)) max = Math.max(max, value);
+    }
+    return max;
 }
 
 export function computeSuccess(predictions: tf.Tensor2D, target: tf.Tensor2D): number {

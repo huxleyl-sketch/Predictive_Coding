@@ -27,6 +27,9 @@ export type NiftyTrainingSet = {
     baselines: BaselineMetrics;
 };
 
+export type DatasetMode = "raw" | "sma";
+export const MARKET_CLASS_LABELS = ["Up", "Flat", "Down"] as const;
+
 type MarketRow = {
     open: number;
     high: number;
@@ -38,6 +41,13 @@ type MarketRow = {
 type NormalizationStats = {
     means: number[];
     stds: number[];
+};
+
+type WindowSummary = {
+    momentum: number;
+    meanReturn: number;
+    volatility: number;
+    meanRange: number;
 };
 
 function parseCsvRow(line: string): string[] {
@@ -91,6 +101,55 @@ function applyNormalization(rows: number[][], stats: NormalizationStats): number
     );
 }
 
+function safeRatioChange(next: number, prev: number): number {
+    if (!Number.isFinite(next) || !Number.isFinite(prev) || prev === 0) return 0;
+    return (next - prev) / Math.abs(prev);
+}
+
+function buildDayFeatures(day: MarketRow, previousDay: MarketRow): number[] {
+    const openVsPrevClose = safeRatioChange(day.open, previousDay.close);
+    const closeVsPrevClose = safeRatioChange(day.close, previousDay.close);
+    const intradayReturn = safeRatioChange(day.close, day.open);
+    const highVsOpen = safeRatioChange(day.high, day.open);
+    const lowVsOpen = safeRatioChange(day.low, day.open);
+    const rangeVsOpen = day.open !== 0 ? (day.high - day.low) / Math.abs(day.open) : 0;
+    const volumeLog = Math.log1p(Math.max(day.volume, 0));
+    const volumeChange = safeRatioChange(day.volume, previousDay.volume);
+
+    return [
+        openVsPrevClose,
+        closeVsPrevClose,
+        intradayReturn,
+        highVsOpen,
+        lowVsOpen,
+        rangeVsOpen,
+        volumeLog,
+        volumeChange,
+    ];
+}
+
+function summarizeWindow(rows: MarketRow[], startInclusive: number, endExclusive: number): WindowSummary {
+    const returns: number[] = [];
+    const ranges: number[] = [];
+    for (let i = startInclusive; i < endExclusive; i++) {
+        const day = rows[i]!;
+        const previousDay = rows[Math.max(0, i - 1)]!;
+        returns.push(safeRatioChange(day.close, previousDay.close));
+        ranges.push(day.open !== 0 ? (day.high - day.low) / Math.abs(day.open) : 0);
+    }
+
+    const firstClose = rows[startInclusive]!.close;
+    const lastClose = rows[endExclusive - 1]!.close;
+    const momentum = safeRatioChange(lastClose, firstClose);
+    const meanReturn = returns.reduce((sum, value) => sum + value, 0) / Math.max(1, returns.length);
+    const meanRange = ranges.reduce((sum, value) => sum + value, 0) / Math.max(1, ranges.length);
+    let variance = 0;
+    for (const value of returns) variance += (value - meanReturn) * (value - meanReturn);
+    const volatility = Math.sqrt(variance / Math.max(1, returns.length));
+
+    return { momentum, meanReturn, volatility, meanRange };
+}
+
 function toBatches(features: number[][], labels: number[][], batchSize: number): TrainingBatch[] {
     const batches: TrainingBatch[] = [];
 
@@ -110,7 +169,16 @@ function toBatches(features: number[][], labels: number[][], batchSize: number):
 }
 
 function classFromOneHot(row: number[]): number {
-    return row[0]! >= row[1]! ? 0 : 1;
+    let bestIndex = 0;
+    let bestValue = Number.NEGATIVE_INFINITY;
+    for (let i = 0; i < row.length; i++) {
+        const value = row[i] ?? Number.NEGATIVE_INFINITY;
+        if (value > bestValue) {
+            bestValue = value;
+            bestIndex = i;
+        }
+    }
+    return bestIndex;
 }
 
 function computeMajorityAccuracy(labels: number[][]): number {
@@ -146,6 +214,11 @@ export async function loadNiftyTrainingSet(
     csvPath = '/nifty50_last_10_years.csv',
     batchSize = 128,
     validationRatio = 0.2,
+    lookbackDays = 1,
+    datasetMode: DatasetMode = "raw",
+    smoothingWindow = 5,
+    predictionHorizonDays = 3,
+    flatThresholdPct = 0.5,
 ): Promise<NiftyTrainingSet> {
     const response = await fetch(csvPath);
     if (!response.ok) {
@@ -192,26 +265,41 @@ export async function loadNiftyTrainingSet(
         }
     }
 
-    if (rows.length < 20) {
+    const activeRows = datasetMode === "sma"
+        ? applySimpleMovingAverage(rows, Math.max(2, Math.floor(smoothingWindow)))
+        : rows;
+
+    const contextDays = Math.max(1, Math.floor(lookbackDays));
+    const horizonDays = Math.max(1, Math.floor(predictionHorizonDays));
+    const flatThresholdRatio = Math.max(0, flatThresholdPct) / 100;
+    if (activeRows.length < contextDays + horizonDays + 1) {
         throw new Error('Not enough valid market rows after parsing for train/validation split.');
     }
 
     const featuresRaw: number[][] = [];
     const labels: number[][] = [];
 
-    for (let i = 1; i < rows.length; i++) {
-        const prev = rows[i - 1]!;
-        const current = rows[i]!;
+    for (let i = contextDays; i + horizonDays < activeRows.length; i++) {
+        const current = activeRows[i]!;
+        const future = activeRows[i + horizonDays]!;
+        const windowFeatures: number[] = [];
 
-        featuresRaw.push([
-            prev.open,
-            prev.high,
-            prev.low,
-            prev.close,
-            Math.log1p(Math.max(prev.volume, 0)),
-        ]);
+        for (let j = i - contextDays; j < i; j++) {
+            const day = activeRows[j]!;
+            const previousDay = activeRows[Math.max(0, j - 1)]!;
+            windowFeatures.push(...buildDayFeatures(day, previousDay));
+        }
 
-        labels.push(current.close >= prev.close ? [1, 0] : [0, 1]);
+        const windowSummary = summarizeWindow(activeRows, i - contextDays, i);
+        windowFeatures.push(
+            windowSummary.momentum,
+            windowSummary.meanReturn,
+            windowSummary.volatility,
+            windowSummary.meanRange,
+        );
+
+        featuresRaw.push(windowFeatures);
+        labels.push(labelFromForwardReturn(safeRatioChange(future.close, current.close), flatThresholdRatio));
     }
 
     const sampleCount = featuresRaw.length;
@@ -258,4 +346,39 @@ export async function loadNiftyTrainingSet(
         validationCount: validationFeatures.length,
         baselines,
     };
+}
+
+function labelFromForwardReturn(forwardReturn: number, flatThresholdRatio: number): number[] {
+    if (forwardReturn > flatThresholdRatio) return [1, 0, 0];
+    if (forwardReturn < -flatThresholdRatio) return [0, 0, 1];
+    return [0, 1, 0];
+}
+
+function applySimpleMovingAverage(rows: MarketRow[], windowSize: number): MarketRow[] {
+    if (rows.length === 0) return [];
+    const out: MarketRow[] = [];
+    for (let i = windowSize - 1; i < rows.length; i++) {
+        let open = 0;
+        let high = 0;
+        let low = 0;
+        let close = 0;
+        let volume = 0;
+        for (let j = i - windowSize + 1; j <= i; j++) {
+            const row = rows[j]!;
+            open += row.open;
+            high += row.high;
+            low += row.low;
+            close += row.close;
+            volume += row.volume;
+        }
+        const invWindow = 1 / windowSize;
+        out.push({
+            open: open * invWindow,
+            high: high * invWindow,
+            low: low * invWindow,
+            close: close * invWindow,
+            volume: volume * invWindow,
+        });
+    }
+    return out;
 }

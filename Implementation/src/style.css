@@ -6,18 +6,13 @@ body {
   margin: 16px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-}
-
-#actionRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 14px;
+  background: #eef3f8;
+  color: #1f2937;
 }
 
 #configPanel {
-  width: min(100%, 720px);
+  width: min(100%, 920px);
   display: grid;
   grid-template-columns: 1fr 120px;
   gap: 6px 10px;
@@ -38,13 +33,64 @@ body {
   box-sizing: border-box;
 }
 
-#successCanvas,
-#validationCanvas,
-#errorCanvas,
-#interpretationCanvas {
-  width: min(100%, 720px);
+.marketGrid,
+#marketGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.marketPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #c4d0df;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
+.marketHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.marketHeader h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.marketActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.marketStatus {
+  min-height: 20px;
+  font-size: 14px;
+  color: #475569;
+}
+
+.marketSubStatus {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.marketPanel canvas {
+  width: 100%;
   height: auto;
   border: 1px solid #b7c0cd;
   border-radius: 8px;
   background: #f8fafc;
+}
+
+@media (max-width: 1200px) {
+  #marketGrid {
+    grid-template-columns: 1fr;
+  }
 }

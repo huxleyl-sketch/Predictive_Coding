@@ -8,14 +8,6 @@
   </head>
   <body>
     <div id="app"></div>
-    <div id="actionRow">
-      <label for="train">Train:</label>
-      <input id="train" type="button" value="Train" />
-      <label for="halt">Halt:</label>
-      <input id="halt" type="button" value="Halt" />
-      <label for="retry">Generate:</label>
-      <input id="retry" type="button" value="Generate" />
-    </div>
     <section id="configPanel" aria-label="Training configuration">
       <h3>Training Config</h3>
       <label for="cfgDebug">Debug logs</label>
@@ -26,18 +18,36 @@
       <input id="cfgHaltNonFinite" type="checkbox" checked />
       <label for="cfgBatchSize">Batch size</label>
       <input id="cfgBatchSize" type="number" value="128" min="1" step="1" />
+      <label for="cfgModelKind">Model type</label>
+      <select id="cfgModelKind">
+        <option value="pcn">PCN</option>
+        <option value="standard">Standard TFJS MLP</option>
+      </select>
+      <label for="cfgLookbackDays">Context days</label>
+      <input id="cfgLookbackDays" type="number" value="5" min="1" max="60" step="1" />
+      <label for="cfgDatasetMode">Dataset mode</label>
+      <select id="cfgDatasetMode">
+        <option value="raw">Raw</option>
+        <option value="sma">SMA Smoothed</option>
+      </select>
+      <label for="cfgSmoothingWindow">Smoothing window</label>
+      <input id="cfgSmoothingWindow" type="number" value="5" min="2" max="30" step="1" />
+      <label for="cfgPredictionHorizonDays">Prediction horizon</label>
+      <input id="cfgPredictionHorizonDays" type="number" value="3" min="1" max="30" step="1" />
+      <label for="cfgFlatThresholdPct">Flat threshold %</label>
+      <input id="cfgFlatThresholdPct" type="number" value="0.5" min="0" max="10" step="0.1" />
       <label for="cfgValidationRatio">Validation ratio</label>
       <input id="cfgValidationRatio" type="number" value="0.2" min="0.05" max="0.45" step="0.01" />
       <label for="cfgEpochs">Epochs</label>
-      <input id="cfgEpochs" type="number" value="40" min="1" step="1" />
+      <input id="cfgEpochs" type="number" value="10" min="1" step="1" />
       <label for="cfgInferSteps">Infer steps</label>
-      <input id="cfgInferSteps" type="number" value="25" min="1" step="1" />
+      <input id="cfgInferSteps" type="number" value="13" min="1" step="1" />
       <label for="cfgLearnSteps">Learn steps</label>
-      <input id="cfgLearnSteps" type="number" value="25" min="1" step="1" />
+      <input id="cfgLearnSteps" type="number" value="128" min="1" step="1" />
       <label for="cfgInferLr">Infer LR</label>
-      <input id="cfgInferLr" type="number" value="0.01" min="0.000001" step="0.0001" />
+      <input id="cfgInferLr" type="number" value="0.05" min="0.000001" step="0.0001" />
       <label for="cfgLearnLr">Learn LR</label>
-      <input id="cfgLearnLr" type="number" value="0.0001" min="0.0000001" step="0.00001" />
+      <input id="cfgLearnLr" type="number" value="0.005" min="0.0000001" step="0.00001" />
       <label for="cfgGradClip">Gradient clip</label>
       <input id="cfgGradClip" type="number" value="3" min="0.01" step="0.1" />
       <label for="cfgHiddenLayers">Hidden layers</label>
@@ -55,11 +65,42 @@
       <label for="cfgFalseBalanceStrength">FP/FN balance strength</label>
       <input id="cfgFalseBalanceStrength" type="number" value="1.5" min="0" step="0.1" />
     </section>
-    <div id="debug">Wait</div>
-    <canvas id="successCanvas" width="720" height="260" aria-label="Success indicator graph"></canvas>
-    <canvas id="validationCanvas" width="720" height="260" aria-label="Validation accuracy graph"></canvas>
-    <canvas id="errorCanvas" width="720" height="260" aria-label="Training error graph"></canvas>
-    <canvas id="interpretationCanvas" width="720" height="260" aria-label="Prediction interpretation graph"></canvas>
+    <section id="marketGrid" aria-label="Market models">
+      <article class="marketPanel" id="marketPanelNifty">
+        <div class="marketHeader">
+          <h3>NIFTY 50</h3>
+          <div class="marketActions">
+            <input id="trainNifty" type="button" value="Train" />
+            <input id="haltNifty" type="button" value="Halt" />
+            <input id="generateNifty" type="button" value="Generate" />
+            <input id="crossTestNifty" type="button" value="Cross Test" />
+          </div>
+        </div>
+        <div class="marketStatus" id="debugNifty">NIFTY 50 selected. Click Train.</div>
+        <div class="marketStatus marketSubStatus" id="crossDebugNifty">Cross-test result will appear here.</div>
+        <canvas id="successCanvasNifty" width="720" height="260" aria-label="NIFTY 50 train accuracy graph"></canvas>
+        <canvas id="validationCanvasNifty" width="720" height="260" aria-label="NIFTY 50 validation accuracy graph"></canvas>
+        <canvas id="errorCanvasNifty" width="720" height="260" aria-label="NIFTY 50 training error graph"></canvas>
+        <canvas id="interpretationCanvasNifty" width="720" height="260" aria-label="NIFTY 50 prediction interpretation graph"></canvas>
+      </article>
+      <article class="marketPanel" id="marketPanelSp500">
+        <div class="marketHeader">
+          <h3>S&amp;P 500</h3>
+          <div class="marketActions">
+            <input id="trainSp500" type="button" value="Train" />
+            <input id="haltSp500" type="button" value="Halt" />
+            <input id="generateSp500" type="button" value="Generate" />
+            <input id="crossTestSp500" type="button" value="Cross Test" />
+          </div>
+        </div>
+        <div class="marketStatus" id="debugSp500">S&amp;P 500 selected. Click Train.</div>
+        <div class="marketStatus marketSubStatus" id="crossDebugSp500">Cross-test result will appear here.</div>
+        <canvas id="successCanvasSp500" width="720" height="260" aria-label="S&P 500 train accuracy graph"></canvas>
+        <canvas id="validationCanvasSp500" width="720" height="260" aria-label="S&P 500 validation accuracy graph"></canvas>
+        <canvas id="errorCanvasSp500" width="720" height="260" aria-label="S&P 500 training error graph"></canvas>
+        <canvas id="interpretationCanvasSp500" width="720" height="260" aria-label="S&P 500 prediction interpretation graph"></canvas>
+      </article>
+    </section>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
