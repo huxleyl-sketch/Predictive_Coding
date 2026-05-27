@@ -64,6 +64,7 @@ type MarketState = {
 };
 
 const TRAIN_HALTED_ERROR = "TRAIN_HALTED_BY_USER";
+const publicAsset = (name: string): string => `${import.meta.env.BASE_URL}${name}`;
 
 const cfgDebug = document.getElementById("cfgDebug") as HTMLInputElement | null;
 const cfgSignedOutput = document.getElementById("cfgSignedOutput") as HTMLInputElement | null;
@@ -91,8 +92,8 @@ const cfgBalanceFalseError = document.getElementById("cfgBalanceFalseError") as 
 const cfgFalseBalanceStrength = document.getElementById("cfgFalseBalanceStrength") as HTMLInputElement | null;
 
 const marketStates: Record<MarketKey, MarketState> = {
-    nifty: createMarketState("nifty", "NIFTY 50", "/nifty50_last_10_years.csv"),
-    sp500: createMarketState("sp500", "S&P 500", "/sp500_last_10_years.csv"),
+    nifty: createMarketState("nifty", "NIFTY 50", publicAsset("nifty50_last_10_years.csv")),
+    sp500: createMarketState("sp500", "S&P 500", publicAsset("sp500_last_10_years.csv")),
 };
 
 for (const market of Object.values(marketStates)) {

@@ -211,7 +211,7 @@ function computePersistenceAccuracy(allLabels: number[][], startIndexInclusive: 
 }
 
 export async function loadNiftyTrainingSet(
-    csvPath = '/nifty50_last_10_years.csv',
+    csvPath = `${import.meta.env.BASE_URL}nifty50_last_10_years.csv`,
     batchSize = 128,
     validationRatio = 0.2,
     lookbackDays = 1,
